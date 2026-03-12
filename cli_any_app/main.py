@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from cli_any_app.config import settings
 
@@ -29,6 +29,19 @@ app.include_router(flows_router)
 app.include_router(capture_router)
 app.include_router(cert_router)
 app.include_router(domains_router)
+
+
+from cli_any_app.api.websocket import manager
+
+
+@app.websocket("/ws/traffic/{session_id}")
+async def traffic_ws(ws: WebSocket, session_id: str):
+    await manager.connect(session_id, ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(session_id, ws)
 
 
 def cli_entry():

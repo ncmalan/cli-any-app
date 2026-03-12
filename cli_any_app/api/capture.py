@@ -55,4 +55,16 @@ async def receive_capture(payload: CapturePayload):
         )
         db.add(req)
         await db.commit()
+    from cli_any_app.api.websocket import manager
+
+    await manager.broadcast(payload.session_id, {
+        "type": "request",
+        "method": payload.method,
+        "url": payload.url,
+        "status_code": payload.status_code,
+        "content_type": payload.content_type,
+        "is_api": api_flag,
+        "domain": domain,
+        "flow_label": flow.label,
+    })
     return {"status": "captured", "is_api": api_flag, "domain": domain}
