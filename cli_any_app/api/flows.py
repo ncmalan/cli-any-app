@@ -6,6 +6,7 @@ from sqlalchemy import select, func
 
 from cli_any_app.models.database import get_session
 from cli_any_app.models.flow import Flow
+from cli_any_app.models.session import Session
 
 router = APIRouter(prefix="/api/sessions/{session_id}/flows", tags=["flows"])
 
@@ -36,6 +37,9 @@ class FlowResponse(BaseModel):
 @router.post("", status_code=201, response_model=FlowResponse)
 async def create_flow(session_id: str, body: FlowCreate):
     async with get_session() as db:
+        session = await db.get(Session, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
         result = await db.execute(
             select(func.coalesce(func.max(Flow.order), 0)).where(Flow.session_id == session_id)
         )
