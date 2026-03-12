@@ -20,3 +20,4 @@ class Session(Base):
     )
 
     flows: Mapped[list["Flow"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+    generated_cli: Mapped["GeneratedCLI | None"] = relationship(back_populates="session", uselist=False)
