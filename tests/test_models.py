@@ -1,0 +1,51 @@
+import json
+
+import pytest
+from sqlalchemy import select
+
+from cli_any_app.models.database import get_session, init_db
+from cli_any_app.models.session import Session
+from cli_any_app.models.flow import Flow
+from cli_any_app.models.request import CapturedRequest
+
+
+@pytest.fixture(autouse=True)
+async def setup_db(tmp_path):
+    from cli_any_app.models import database
+    database.DATABASE_URL = f"sqlite+aiosqlite:///{tmp_path}/test.db"
+    await init_db()
+    yield
+
+
+@pytest.mark.asyncio
+async def test_create_session_with_flows_and_requests(setup_db):
+    async with get_session() as db:
+        session = Session(name="Test Session", app_name="test-app")
+        db.add(session)
+        await db.flush()
+
+        flow = Flow(session_id=session.id, label="login", order=0)
+        db.add(flow)
+        await db.flush()
+
+        req = CapturedRequest(
+            flow_id=flow.id,
+            method="POST",
+            url="https://api.example.com/auth/login",
+            request_headers=json.dumps({"Content-Type": "application/json"}),
+            request_body='{"email":"test@test.com"}',
+            status_code=200,
+            response_headers=json.dumps({"Content-Type": "application/json"}),
+            response_body='{"token":"abc123"}',
+            content_type="application/json",
+            is_api=True,
+        )
+        db.add(req)
+        await db.commit()
+
+    async with get_session() as db:
+        result = await db.execute(select(Session))
+        s = result.scalar_one()
+        assert s.name == "Test Session"
+        assert s.app_name == "test-app"
+        assert s.status == "stopped"

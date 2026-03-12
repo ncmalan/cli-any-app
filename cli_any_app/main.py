@@ -11,12 +11,8 @@ async def lifespan(app: FastAPI):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.generated_dir.mkdir(parents=True, exist_ok=True)
     settings.bodies_dir.mkdir(parents=True, exist_ok=True)
-    # Init DB on startup (models module created in Task 2)
-    try:
-        from cli_any_app.models.database import init_db
-        await init_db()
-    except ImportError:
-        pass
+    from cli_any_app.models.database import init_db
+    await init_db()
     yield
 
 
