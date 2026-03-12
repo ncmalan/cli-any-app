@@ -44,6 +44,13 @@ async def traffic_ws(ws: WebSocket, session_id: str):
         manager.disconnect(session_id, ws)
 
 
+from pathlib import Path
+static_dir = Path(__file__).parent / "ui" / "static"
+if static_dir.exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="ui")
+
+
 def cli_entry():
     uvicorn.run(
         "cli_any_app.main:app",
