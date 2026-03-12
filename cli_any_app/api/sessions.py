@@ -64,3 +64,32 @@ async def delete_session(session_id: str):
             raise HTTPException(status_code=404, detail="Session not found")
         await db.delete(session)
         await db.commit()
+
+
+@router.post("/{session_id}/start-recording", response_model=SessionResponse)
+async def start_recording(session_id: str):
+    from cli_any_app.capture.proxy_manager import proxy_manager
+    async with get_session() as db:
+        session = await db.get(Session, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        port = proxy_manager.start(session_id, session.proxy_port)
+        session.status = "recording"
+        session.proxy_port = port
+        await db.commit()
+        await db.refresh(session)
+        return session
+
+
+@router.post("/{session_id}/stop-recording", response_model=SessionResponse)
+async def stop_recording(session_id: str):
+    from cli_any_app.capture.proxy_manager import proxy_manager
+    async with get_session() as db:
+        session = await db.get(Session, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        proxy_manager.stop()
+        session.status = "stopped"
+        await db.commit()
+        await db.refresh(session)
+        return session
