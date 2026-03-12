@@ -1,5 +1,5 @@
+import ast
 import py_compile
-import subprocess
 from pathlib import Path
 
 
@@ -24,12 +24,10 @@ def validate_generated_cli(package_dir: Path) -> dict:
     cli_name = package_dir.name.replace("-", "_")
     cli_module = package_dir / cli_name / "cli.py"
     if cli_module.exists():
-        result = subprocess.run(
-            ["python", "-c", f"import ast; ast.parse(open('{cli_module}').read())"],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            errors.append(f"CLI module parse error: {result.stderr}")
+        try:
+            ast.parse(cli_module.read_text())
+        except SyntaxError as e:
+            errors.append(f"CLI module parse error: {e}")
     else:
         errors.append("cli.py not found in package")
 
