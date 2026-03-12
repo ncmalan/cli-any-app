@@ -11,3 +11,4 @@ requirements.txt
 *.db
 .DS_Store
 node_modules/
+cli_any_app/ui/static/
