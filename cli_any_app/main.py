@@ -23,12 +23,14 @@ from cli_any_app.api.flows import router as flows_router
 from cli_any_app.api.capture import router as capture_router
 from cli_any_app.api.cert import router as cert_router
 from cli_any_app.api.domains import router as domains_router
+from cli_any_app.api.generate import router as generate_router
 
 app.include_router(sessions_router)
 app.include_router(flows_router)
 app.include_router(capture_router)
 app.include_router(cert_router)
 app.include_router(domains_router)
+app.include_router(generate_router)
 
 
 from cli_any_app.api.websocket import manager
