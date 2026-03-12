@@ -6,3 +6,8 @@ dist/
 build/
 data/
 .env
+requirements.txt
+.ruff_cache/
+*.db
+.DS_Store
+node_modules/

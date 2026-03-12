@@ -31,5 +31,8 @@ dev = [
     "ruff>=0.3.0",
 ]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
 [project.scripts]
 cli-any-app = "cli_any_app.main:cli_entry"

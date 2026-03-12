@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 
 from cli_any_app.config import settings
 
