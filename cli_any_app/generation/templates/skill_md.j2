@@ -1,0 +1,22 @@
+# {{ cli_name }}
+
+CLI tool for interacting with {{ app_name }}.
+
+## Setup
+
+```bash
+pip install ./{{ cli_name }}
+```
+
+## Available Commands
+
+{% for group in command_groups %}
+### {{ group.name }}
+{% for cmd in group.commands %}
+- `{{ cli_name }} {{ group.name }} {{ cmd.name }}` — {{ cmd.description }}
+{% endfor %}
+{% endfor %}
+
+## Output
+
+All commands output JSON by default. Use `--format table` for human-readable output.

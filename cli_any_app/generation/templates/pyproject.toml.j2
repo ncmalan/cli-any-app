@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "{{ cli_name }}"
+version = "0.1.0"
+description = "CLI tool for {{ app_name }}"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.0.0",
+    "httpx>=0.27.0",
+]
+
+[project.scripts]
+{{ cli_name }} = "{{ package_name }}.cli:cli"
