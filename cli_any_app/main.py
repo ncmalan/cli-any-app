@@ -18,6 +18,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="cli-any-app", lifespan=lifespan)
 
+from cli_any_app.api.sessions import router as sessions_router
+from cli_any_app.api.flows import router as flows_router
+
+app.include_router(sessions_router)
+app.include_router(flows_router)
+
 
 def cli_entry():
     uvicorn.run(
