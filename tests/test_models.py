@@ -11,9 +11,7 @@ from cli_any_app.models.request import CapturedRequest
 
 @pytest.fixture(autouse=True)
 async def setup_db(tmp_path):
-    from cli_any_app.models import database
-    database.DATABASE_URL = f"sqlite+aiosqlite:///{tmp_path}/test.db"
-    await init_db()
+    await init_db(f"sqlite+aiosqlite:///{tmp_path}/test.db")
     yield
 
 

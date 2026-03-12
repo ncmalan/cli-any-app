@@ -12,7 +12,7 @@ async def lifespan(app: FastAPI):
     settings.generated_dir.mkdir(parents=True, exist_ok=True)
     settings.bodies_dir.mkdir(parents=True, exist_ok=True)
     from cli_any_app.models.database import init_db
-    await init_db()
+    await init_db(settings.db_url)
     yield
 
 
