@@ -1,0 +1,114 @@
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+
+@pytest.fixture(autouse=True)
+async def setup_db(tmp_path):
+    from cli_any_app.models.database import init_db
+    await init_db(f"sqlite+aiosqlite:///{tmp_path}/test.db")
+    yield
+
+
+@pytest.fixture
+async def client():
+    from cli_any_app.main import app
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+async def _create_session_with_requests(client):
+    """Helper: create a session, flow, and some captured requests."""
+    resp = await client.post("/api/sessions", json={"name": "Test", "app_name": "test-app"})
+    session_id = resp.json()["id"]
+
+    resp = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
+    flow_id = resp.json()["id"]
+
+    # Insert requests directly into the DB
+    from cli_any_app.models.database import get_session
+    from cli_any_app.models.request import CapturedRequest
+
+    async with get_session() as db:
+        for url in [
+            "https://api.example.com/users",
+            "https://api.example.com/posts",
+            "https://api.example.com/users/1",
+            "https://tracking.facebook.com/event",
+            "https://analytics.google-analytics.com/collect",
+        ]:
+            req = CapturedRequest(
+                flow_id=flow_id,
+                method="GET",
+                url=url,
+                status_code=200,
+            )
+            db.add(req)
+        await db.commit()
+
+    return session_id
+
+
+async def test_list_domains(client):
+    session_id = await _create_session_with_requests(client)
+    resp = await client.get(f"/api/sessions/{session_id}/domains")
+    assert resp.status_code == 200
+    domains = resp.json()
+    assert len(domains) == 3  # example.com, facebook.com, google-analytics.com
+
+    # example.com should have highest count (3 requests)
+    assert domains[0]["domain"] == "api.example.com"
+    assert domains[0]["request_count"] == 3
+    assert domains[0]["is_noise"] is False
+    assert domains[0]["enabled"] is True
+
+    # noise domains should be disabled by default
+    noise_domains = [d for d in domains if d["is_noise"]]
+    assert len(noise_domains) == 2
+    for d in noise_domains:
+        assert d["enabled"] is False
+
+
+async def test_list_domains_empty_session(client):
+    resp = await client.post("/api/sessions", json={"name": "Empty", "app_name": "app"})
+    session_id = resp.json()["id"]
+    resp = await client.get(f"/api/sessions/{session_id}/domains")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_toggle_domain(client):
+    session_id = await _create_session_with_requests(client)
+
+    # Enable a noise domain
+    resp = await client.put(
+        f"/api/sessions/{session_id}/domains/tracking.facebook.com",
+        json={"enabled": True},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["domain"] == "tracking.facebook.com"
+    assert data["enabled"] is True
+    assert data["is_noise"] is True
+
+    # Verify it persists in the list
+    resp = await client.get(f"/api/sessions/{session_id}/domains")
+    fb_domain = [d for d in resp.json() if d["domain"] == "tracking.facebook.com"][0]
+    assert fb_domain["enabled"] is True
+
+
+async def test_toggle_domain_disable(client):
+    session_id = await _create_session_with_requests(client)
+
+    # Disable a non-noise domain
+    resp = await client.put(
+        f"/api/sessions/{session_id}/domains/api.example.com",
+        json={"enabled": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+
+    # Verify it persists in the list
+    resp = await client.get(f"/api/sessions/{session_id}/domains")
+    example = [d for d in resp.json() if d["domain"] == "api.example.com"][0]
+    assert example["enabled"] is False
