@@ -6,36 +6,17 @@ A tool that captures mobile app network traffic via mitmproxy, lets users label 
 
 ## Development
 
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+
-- mitmproxy (`brew install mitmproxy` or `pip install mitmproxy`)
-
-### Backend
+Always use the virtual environment. See README.md for full setup instructions.
 
 ```bash
+source .venv/bin/activate
 pip install -e ".[dev]"
-cli-any-app  # starts FastAPI on :8000
-```
-
-### Frontend (dev mode)
-
-```bash
-cd frontend
-npm install
-npm run dev  # starts Vite dev server on :5173, proxies /api to :8000
-```
-
-### Build frontend for production
-
-```bash
-cd frontend && npm run build  # outputs to cli_any_app/ui/static/
 ```
 
 ## Testing
 
 ```bash
+source .venv/bin/activate
 pytest tests/ -v
 ```
 
