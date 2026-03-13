@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   getSession, listFlows, listDomains, deleteFlow,
-  toggleDomain, startGeneration, getApiKeyStatus, setApiKey,
+  toggleDomain, startGeneration, getApiKeyStatus, setApiKey, listRequests,
 } from '../lib/api'
 import type { Session, Flow, DomainInfo } from '../lib/api'
 import MethodBadge from '../components/MethodBadge'
@@ -90,14 +90,10 @@ export default function SessionReview() {
     setExpandedFlow(flowId)
     if (!flowRequests[flowId] && id) {
       try {
-        // Try to load requests for this flow
-        const res = await fetch(`/api/sessions/${id}/flows/${flowId}/requests`)
-        if (res.ok) {
-          const data = await res.json()
-          setFlowRequests(prev => ({ ...prev, [flowId]: data }))
-        }
-      } catch {
-        // Endpoint may not exist yet
+        const data = await listRequests(id, flowId)
+        setFlowRequests(prev => ({ ...prev, [flowId]: data }))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load flow requests')
       }
     }
   }, [expandedFlow, flowRequests, id])
@@ -308,7 +304,7 @@ export default function SessionReview() {
                         )
                       ) : (
                         <p className="text-sm text-gray-500">
-                          Request details will be available once the requests endpoint is implemented.
+                          Loading requests...
                         </p>
                       )}
                     </div>

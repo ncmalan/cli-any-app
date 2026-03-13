@@ -73,3 +73,32 @@ async def test_delete_flow(client, session_id):
 async def test_delete_flow_not_found(client, session_id):
     resp = await client.delete(f"/api/sessions/{session_id}/flows/nonexistent")
     assert resp.status_code == 404
+
+
+async def test_list_flow_requests(client, session_id):
+    create = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
+    flow_id = create.json()["id"]
+
+    from cli_any_app.models.database import get_session
+    from cli_any_app.models.request import CapturedRequest
+
+    async with get_session() as db:
+        db.add(
+            CapturedRequest(
+                flow_id=flow_id,
+                method="GET",
+                url="https://api.example.com/items",
+                status_code=200,
+                request_headers="{}",
+                response_headers="{}",
+                content_type="application/json",
+            )
+        )
+        await db.commit()
+
+    resp = await client.get(f"/api/sessions/{session_id}/flows/{flow_id}/requests")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["flow_id"] == flow_id
+    assert data[0]["url"] == "https://api.example.com/items"

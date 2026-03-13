@@ -74,7 +74,10 @@ async def start_recording(session_id: str):
         session = await db.get(Session, session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        port = proxy_manager.start(session_id, session.proxy_port)
+        try:
+            port = proxy_manager.start(session_id, session.proxy_port)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         session.status = "recording"
         session.proxy_port = port
         await db.commit()
@@ -89,7 +92,10 @@ async def stop_recording(session_id: str):
         session = await db.get(Session, session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        proxy_manager.stop()
+        try:
+            proxy_manager.stop(session_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         session.status = "stopped"
         await db.commit()
         await db.refresh(session)

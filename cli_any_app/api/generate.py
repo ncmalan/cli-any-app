@@ -1,15 +1,17 @@
 import json
 import logging
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 
 logger = logging.getLogger(__name__)
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from cli_any_app.api.domains import is_domain_enabled
+from cli_any_app.capture.filters import extract_domain
 from cli_any_app.models.database import get_session
 from cli_any_app.models.session import Session
 from cli_any_app.models.flow import Flow
-from cli_any_app.models.request import CapturedRequest
 from cli_any_app.models.generated_cli import GeneratedCLI
 from cli_any_app.generation.pipeline import run_pipeline
 
@@ -32,29 +34,30 @@ async def start_generation(session_id: str, background_tasks: BackgroundTasks):
         )
         flows = result.scalars().all()
 
+        serialized_flows = []
+        for flow in flows:
+            requests = [
+                {
+                    "method": r.method,
+                    "url": r.url,
+                    "request_headers": r.request_headers,
+                    "request_body": r.request_body,
+                    "status_code": r.status_code,
+                    "response_headers": r.response_headers,
+                    "response_body": r.response_body,
+                    "content_type": r.content_type,
+                    "is_api": r.is_api,
+                }
+                for r in flow.requests
+                if r.is_api and is_domain_enabled(session_id, extract_domain(r.url))
+            ]
+            if requests:
+                serialized_flows.append({"label": flow.label, "requests": requests})
+
         session_data = {
             "app_name": session.app_name,
-            "flows": [
-                {
-                    "label": f.label,
-                    "requests": [
-                        {
-                            "method": r.method,
-                            "url": r.url,
-                            "request_headers": r.request_headers,
-                            "request_body": r.request_body,
-                            "status_code": r.status_code,
-                            "response_headers": r.response_headers,
-                            "response_body": r.response_body,
-                            "content_type": r.content_type,
-                            "is_api": r.is_api,
-                        }
-                        for r in f.requests
-                        if r.is_api
-                    ],
-                }
-                for f in flows
-            ],
+            "session_name": session.name,
+            "flows": serialized_flows,
         }
 
         session.status = "generating"
@@ -85,16 +88,22 @@ async def _run_generation(session_id: str, session_data: dict):
 
         async with get_session() as db:
             session = await db.get(Session, session_id)
+            if not session:
+                return
             session.status = "complete" if result["status"] in ("success", "validation_errors") else "error"
 
-            # Store the generated CLI metadata
-            generated = GeneratedCLI(
-                session_id=session_id,
-                api_spec=json.dumps(result.get("api_spec", {})),
-                package_path=result.get("package_path", ""),
-                skill_md="",
+            generated_result = await db.execute(
+                select(GeneratedCLI).where(GeneratedCLI.session_id == session_id)
             )
-            db.add(generated)
+            generated = generated_result.scalar_one_or_none()
+            if not generated:
+                generated = GeneratedCLI(session_id=session_id)
+                db.add(generated)
+
+            package_path = result.get("package_path", "")
+            generated.api_spec = json.dumps(result.get("api_spec", {}))
+            generated.package_path = package_path
+            generated.skill_md = _load_skill_md(package_path)
             await db.commit()
     except Exception as e:
         logger.exception(f"Generation failed for session {session_id}: {e}")
@@ -105,6 +114,17 @@ async def _run_generation(session_id: str, session_data: dict):
                 session.status = "error"
                 session.error_message = str(e)
                 await db.commit()
+
+
+def _load_skill_md(package_path: str) -> str:
+    if not package_path:
+        return ""
+
+    skill_path = Path(package_path) / "SKILL.md"
+    try:
+        return skill_path.read_text()
+    except OSError:
+        return ""
 
 
 @router.get("/status")

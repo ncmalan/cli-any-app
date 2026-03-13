@@ -34,18 +34,19 @@ def test_normalize_strips_volatile_headers():
         "app_name": "test",
         "flows": [{"label": "test", "requests": [{
             "method": "GET", "url": "https://api.example.com/test",
-            "request_headers": '{"date": "Wed, 01 Jan 2025", "x-request-id": "abc123", "Content-Type": "application/json"}',
+            "request_headers": '{"Date": "Wed, 01 Jan 2025", "X-Request-Id": "abc123", "Content-Type": "application/json"}',
             "request_body": None, "status_code": 200,
-            "response_headers": '{"date": "Wed, 01 Jan 2025", "server-timing": "total;dur=50"}',
+            "response_headers": '{"Date": "Wed, 01 Jan 2025", "Server-Timing": "total;dur=50"}',
             "response_body": '{}', "content_type": "application/json", "is_api": True,
         }]}],
     }
     result = normalize_session_data(raw)
     req = result["flows"][0]["requests"][0]
-    assert "date" not in req["request_headers"]
-    assert "x-request-id" not in req["request_headers"]
+    assert "Date" not in req["request_headers"]
+    assert "X-Request-Id" not in req["request_headers"]
     assert "Content-Type" in req["request_headers"]
-    assert "server-timing" not in req["response_headers"]
+    assert "Date" not in req["response_headers"]
+    assert "Server-Timing" not in req["response_headers"]
 
 
 def test_normalize_detects_url_patterns():

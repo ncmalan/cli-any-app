@@ -25,6 +25,11 @@ class DomainToggle(BaseModel):
 _domain_filters: dict[str, dict[str, bool]] = {}
 
 
+def is_domain_enabled(session_id: str, domain: str) -> bool:
+    filters = _domain_filters.get(session_id, {})
+    return filters.get(domain, not matches_noise_pattern(domain))
+
+
 @router.get("", response_model=list[DomainInfo])
 async def list_domains(session_id: str):
     async with get_session() as db:

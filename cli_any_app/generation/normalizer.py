@@ -2,6 +2,14 @@ import json
 import re
 from urllib.parse import urlparse
 
+VOLATILE_HEADER_KEYS = {
+    "date",
+    "x-request-id",
+    "x-trace-id",
+    "cf-ray",
+    "server-timing",
+}
+
 
 def normalize_session_data(raw: dict) -> dict:
     app_name = raw["app_name"]
@@ -23,9 +31,8 @@ def normalize_session_data(raw: dict) -> dict:
             request_body = _parse_json_or_raw(req.get("request_body"))
             response_body = _parse_json_or_raw(req.get("response_body"))
 
-            for h in ["date", "x-request-id", "x-trace-id", "cf-ray", "server-timing"]:
-                request_headers.pop(h, None)
-                response_headers.pop(h, None)
+            _strip_volatile_headers(request_headers)
+            _strip_volatile_headers(response_headers)
 
             path = parsed.path
             query = parsed.query
@@ -81,3 +88,9 @@ def _parse_json_or_raw(val):
         return json.loads(val)
     except (json.JSONDecodeError, TypeError):
         return val
+
+
+def _strip_volatile_headers(headers: dict):
+    for key in list(headers.keys()):
+        if key.lower() in VOLATILE_HEADER_KEYS:
+            headers.pop(key, None)

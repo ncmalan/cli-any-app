@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 import anthropic
 
@@ -237,6 +238,32 @@ def _handle_tool_call(name: str, input_data: dict, normalized_data: dict) -> str
     return json.dumps({"error": f"Unknown tool: {name}"})
 
 
+def _parse_api_spec_from_text(text: str) -> dict | None:
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 3 and lines[0].startswith("```") and lines[-1].startswith("```"):
+            cleaned = "\n".join(lines[1:-1]).strip()
+
+    candidates = [cleaned]
+    match = re.search(r"\{.*\}", cleaned, re.S)
+    if match:
+        candidates.append(match.group(0))
+
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+
+    return None
+
+
 def get_client() -> anthropic.AsyncAnthropic:
     return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
@@ -291,7 +318,7 @@ async def analyze_api_surface(normalized_data: dict, on_progress=None) -> dict:
         await emit(f"Thinking... (iteration {iteration + 1})")
 
         response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=8192,
             system=SYSTEM_PROMPT.format(app=app_name),
             messages=messages,
@@ -303,15 +330,22 @@ async def analyze_api_surface(normalized_data: dict, on_progress=None) -> dict:
         messages.append({"role": "assistant", "content": assistant_content})
 
         # Extract any text blocks (Claude's reasoning)
-        text_blocks = [b for b in assistant_content if b.type == "text"]
+        text_blocks = [
+            block for block in assistant_content
+            if isinstance(getattr(block, "text", None), str) and getattr(block, "type", None) != "tool_use"
+        ]
         for block in text_blocks:
             if block.text.strip():
                 await emit(block.text.strip()[:200])
 
         # Check if there are tool uses
-        tool_uses = [block for block in assistant_content if block.type == "tool_use"]
+        tool_uses = [block for block in assistant_content if getattr(block, "type", None) == "tool_use"]
 
         if not tool_uses:
+            text_response = "\n\n".join(block.text for block in text_blocks if block.text.strip())
+            api_spec = _parse_api_spec_from_text(text_response)
+            if api_spec is not None:
+                await emit("API specification complete!")
             break
 
         # Process each tool call

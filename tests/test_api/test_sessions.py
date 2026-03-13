@@ -58,3 +58,58 @@ async def test_delete_session(client):
 async def test_delete_session_not_found(client):
     resp = await client.delete("/api/sessions/nonexistent")
     assert resp.status_code == 404
+
+
+async def test_start_recording_conflict_returns_409(client, monkeypatch):
+    from cli_any_app.capture.proxy_manager import proxy_manager
+
+    state = {"running": False, "owner": None}
+
+    def fake_start(session_id, port=None):
+        if state["running"] and state["owner"] != session_id:
+            raise RuntimeError(f"Proxy already running for session {state['owner']}")
+        state["running"] = True
+        state["owner"] = session_id
+        return port or 8080
+
+    monkeypatch.setattr(proxy_manager, "start", fake_start)
+
+    s1 = (await client.post("/api/sessions", json={"name": "S1", "app_name": "app1"})).json()["id"]
+    s2 = (await client.post("/api/sessions", json={"name": "S2", "app_name": "app2"})).json()["id"]
+
+    resp = await client.post(f"/api/sessions/{s1}/start-recording")
+    assert resp.status_code == 200
+
+    resp = await client.post(f"/api/sessions/{s2}/start-recording")
+    assert resp.status_code == 409
+    assert "Proxy already running" in resp.text
+
+
+async def test_stop_recording_other_session_returns_409(client, monkeypatch):
+    from cli_any_app.capture.proxy_manager import proxy_manager
+
+    state = {"running": False, "owner": None}
+
+    def fake_start(session_id, port=None):
+        state["running"] = True
+        state["owner"] = session_id
+        return port or 8080
+
+    def fake_stop(session_id=None):
+        if state["running"] and session_id and state["owner"] != session_id:
+            raise RuntimeError(f"Proxy is running for session {state['owner']}")
+        state["running"] = False
+        state["owner"] = None
+
+    monkeypatch.setattr(proxy_manager, "start", fake_start)
+    monkeypatch.setattr(proxy_manager, "stop", fake_stop)
+
+    s1 = (await client.post("/api/sessions", json={"name": "S1", "app_name": "app1"})).json()["id"]
+    s2 = (await client.post("/api/sessions", json={"name": "S2", "app_name": "app2"})).json()["id"]
+
+    resp = await client.post(f"/api/sessions/{s1}/start-recording")
+    assert resp.status_code == 200
+
+    resp = await client.post(f"/api/sessions/{s2}/stop-recording")
+    assert resp.status_code == 409
+    assert "Proxy is running" in resp.text
