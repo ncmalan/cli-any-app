@@ -27,3 +27,4 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+generation_manager = ConnectionManager()

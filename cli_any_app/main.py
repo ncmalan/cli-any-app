@@ -24,6 +24,7 @@ from cli_any_app.api.capture import router as capture_router
 from cli_any_app.api.cert import router as cert_router
 from cli_any_app.api.domains import router as domains_router
 from cli_any_app.api.generate import router as generate_router
+from cli_any_app.api.settings import router as settings_router
 
 app.include_router(sessions_router)
 app.include_router(flows_router)
@@ -31,9 +32,10 @@ app.include_router(capture_router)
 app.include_router(cert_router)
 app.include_router(domains_router)
 app.include_router(generate_router)
+app.include_router(settings_router)
 
 
-from cli_any_app.api.websocket import manager
+from cli_any_app.api.websocket import manager, generation_manager
 
 
 @app.websocket("/ws/traffic/{session_id}")
@@ -44,6 +46,16 @@ async def traffic_ws(ws: WebSocket, session_id: str):
             await ws.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(session_id, ws)
+
+
+@app.websocket("/ws/generation/{session_id}")
+async def generation_ws(ws: WebSocket, session_id: str):
+    await generation_manager.connect(session_id, ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        generation_manager.disconnect(session_id, ws)
 
 
 from pathlib import Path

@@ -5,6 +5,13 @@ import type { Session } from '../lib/api'
 
 const STEPS = ['Normalize', 'Analyze', 'Generate', 'Validate']
 
+interface LogEntry {
+  step: string
+  message: string
+  detail?: string | null
+  timestamp: Date
+}
+
 function stepIndex(status: string): number {
   switch (status) {
     case 'normalizing': return 0
@@ -17,12 +24,52 @@ function stepIndex(status: string): number {
   }
 }
 
+function stepFromLog(step: string): number {
+  switch (step) {
+    case 'normalizing': return 0
+    case 'analyzing': return 1
+    case 'generating': return 2
+    case 'validating': return 3
+    default: return -1
+  }
+}
+
+function stepColor(step: string): string {
+  switch (step) {
+    case 'normalizing': return 'text-purple-400'
+    case 'analyzing': return 'text-blue-400'
+    case 'generating': return 'text-emerald-400'
+    case 'validating': return 'text-yellow-400'
+    case 'complete': return 'text-green-400'
+    case 'error': return 'text-red-400'
+    default: return 'text-gray-400'
+  }
+}
+
+function stepLabel(step: string): string {
+  switch (step) {
+    case 'normalizing': return 'NORMALIZE'
+    case 'analyzing': return 'ANALYZE'
+    case 'generating': return 'GENERATE'
+    case 'validating': return 'VALIDATE'
+    case 'complete': return 'DONE'
+    case 'error': return 'ERROR'
+    case 'starting': return 'START'
+    default: return step.toUpperCase()
+  }
+}
+
 export default function GenerationProgress() {
   const { id } = useParams<{ id: string }>()
   const [session, setSession] = useState<Session | null>(null)
   const [error, setError] = useState('')
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [activeStep, setActiveStep] = useState(0)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const logRef = useRef<HTMLDivElement>(null)
 
+  // Poll session status
   useEffect(() => {
     if (!id) return
 
@@ -49,12 +96,50 @@ export default function GenerationProgress() {
     }
   }, [id])
 
-  const currentStep = session ? stepIndex(session.status) : 0
+  // WebSocket for live progress
+  useEffect(() => {
+    if (!id) return
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${proto}//${window.location.host}/ws/generation/${id}`)
+    wsRef.current = ws
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        const entry: LogEntry = {
+          step: data.step,
+          message: data.message,
+          detail: data.detail,
+          timestamp: new Date(),
+        }
+        setLogs(prev => [...prev, entry])
+
+        const idx = stepFromLog(data.step)
+        if (idx >= 0) setActiveStep(idx)
+      } catch {
+        // ignore parse errors
+      }
+    }
+
+    return () => {
+      ws.close()
+      wsRef.current = null
+    }
+  }, [id])
+
+  // Auto-scroll log
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight
+    }
+  }, [logs])
+
+  const currentStep = session ? stepIndex(session.status) : activeStep
   const isComplete = session?.status === 'complete'
   const isError = session?.status === 'error'
 
   return (
-    <div className="max-w-2xl mx-auto p-8">
+    <div className="max-w-3xl mx-auto p-8">
       <Link to="/" className="text-blue-400 hover:text-blue-300 text-sm">
         &larr; Back to Dashboard
       </Link>
@@ -72,7 +157,7 @@ export default function GenerationProgress() {
       )}
 
       {/* Step indicators */}
-      <div className="flex items-center mb-12">
+      <div className="flex items-center mb-8">
         {STEPS.map((step, i) => {
           const isActive = i === currentStep
           const isDone = i < currentStep && !isError
@@ -98,6 +183,8 @@ export default function GenerationProgress() {
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
+                  ) : isActive && !isComplete ? (
+                    <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
                   ) : (
                     i + 1
                   )}
@@ -120,18 +207,43 @@ export default function GenerationProgress() {
         })}
       </div>
 
-      {/* Status content */}
-      {!isComplete && !isError && (
-        <div className="text-center text-gray-400">
-          <div className="inline-flex items-center gap-3">
-            <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <span>Processing... this may take a few minutes</span>
-          </div>
+      {/* Live log */}
+      <div className="bg-gray-950 border border-gray-800 rounded-lg overflow-hidden">
+        <div className="px-4 py-2 border-b border-gray-800 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Live Progress</h2>
+          {!isComplete && !isError && (
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+              <span className="text-xs text-gray-500">Processing</span>
+            </div>
+          )}
         </div>
-      )}
+        <div
+          ref={logRef}
+          className="p-4 h-80 overflow-y-auto font-mono text-sm space-y-1"
+        >
+          {logs.length === 0 && !isComplete && !isError && (
+            <div className="text-gray-600 text-center py-8">
+              Connecting to generation pipeline...
+            </div>
+          )}
+          {logs.map((entry, i) => (
+            <div key={i} className="flex gap-2">
+              <span className="text-gray-600 shrink-0 text-xs leading-5">
+                {entry.timestamp.toLocaleTimeString()}
+              </span>
+              <span className={`shrink-0 text-xs font-medium leading-5 w-20 ${stepColor(entry.step)}`}>
+                [{stepLabel(entry.step)}]
+              </span>
+              <span className="text-gray-300 leading-5">{entry.message}</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
+      {/* Result sections */}
       {isComplete && (
-        <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-6 space-y-4">
+        <div className="mt-6 bg-green-500/10 border border-green-500/20 rounded-lg p-6 space-y-4">
           <div className="flex items-center gap-3">
             <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -142,15 +254,15 @@ export default function GenerationProgress() {
             <div>
               <span className="text-gray-400">Output directory:</span>
               <code className="ml-2 text-gray-200 bg-gray-800 px-2 py-0.5 rounded">
-                ./output/{session?.app_name}/
+                ./data/generated/{session?.app_name?.replace(' ', '-').toLowerCase()}/
               </code>
             </div>
             <div className="border-t border-green-500/20 pt-3">
               <p className="text-gray-400 mb-2">To install and use:</p>
               <pre className="bg-gray-900 p-3 rounded text-gray-300 text-xs overflow-x-auto">
-{`cd output/${session?.app_name}
+{`cd data/generated/${session?.app_name?.replace(' ', '-').toLowerCase()}
 pip install -e .
-${session?.app_name} --help`}
+${session?.app_name?.replace(' ', '-').toLowerCase()} --help`}
               </pre>
             </div>
           </div>
@@ -158,17 +270,28 @@ ${session?.app_name} --help`}
       )}
 
       {isError && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-6">
+        <div className="mt-6 bg-red-500/10 border border-red-500/20 rounded-lg p-6">
           <div className="flex items-center gap-3 mb-3">
             <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <h2 className="text-lg font-semibold text-red-400">Generation Failed</h2>
           </div>
-          <p className="text-sm text-gray-400">
-            An error occurred during CLI generation. Please check the server logs for details
-            and try again.
-          </p>
+          {session?.error_message ? (
+            <pre className="text-sm text-red-300 bg-red-950/50 p-3 rounded overflow-x-auto whitespace-pre-wrap mb-3">
+              {session.error_message}
+            </pre>
+          ) : (
+            <p className="text-sm text-gray-400 mb-3">
+              An error occurred during CLI generation.
+            </p>
+          )}
+          <Link
+            to={`/session/${id}/review`}
+            className="text-sm text-blue-400 hover:text-blue-300"
+          >
+            Back to review to retry
+          </Link>
         </div>
       )}
 

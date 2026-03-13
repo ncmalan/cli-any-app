@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     mitmproxy_ca_dir: Path = Path.home() / ".mitmproxy"
     anthropic_api_key: str = ""
 
-    model_config = {"env_prefix": "CLI_ANY_APP_"}
+    model_config = {"env_prefix": "CLI_ANY_APP_", "env_file": ".env", "env_file_encoding": "utf-8"}
 
     @property
     def generated_dir(self) -> Path:

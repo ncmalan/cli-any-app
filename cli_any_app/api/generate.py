@@ -1,5 +1,8 @@
 import json
+import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -55,33 +58,52 @@ async def start_generation(session_id: str, background_tasks: BackgroundTasks):
         }
 
         session.status = "generating"
+        session.error_message = None
         await db.commit()
 
     background_tasks.add_task(_run_generation, session_id, session_data)
     return {"status": "started"}
 
 
+async def _broadcast_progress(session_id: str, step: str, message: str, detail: str | None = None):
+    from cli_any_app.api.websocket import generation_manager
+    await generation_manager.broadcast(session_id, {
+        "step": step,
+        "message": message,
+        "detail": detail,
+    })
+
+
 async def _run_generation(session_id: str, session_data: dict):
+    async def on_progress(step: str, message: str, detail: str | None = None):
+        await _broadcast_progress(session_id, step, message, detail)
+
     try:
-        result = await run_pipeline(session_data, session_id)
+        await on_progress("starting", "Generation pipeline started")
+        result = await run_pipeline(session_data, session_id, on_progress=on_progress)
+        await on_progress("complete", "Generation complete!")
+
         async with get_session() as db:
             session = await db.get(Session, session_id)
-            session.status = "complete" if result["status"] == "success" else "error"
+            session.status = "complete" if result["status"] in ("success", "validation_errors") else "error"
 
             # Store the generated CLI metadata
             generated = GeneratedCLI(
                 session_id=session_id,
                 api_spec=json.dumps(result.get("api_spec", {})),
                 package_path=result.get("package_path", ""),
-                skill_md="",  # Could read SKILL.md from package_path
+                skill_md="",
             )
             db.add(generated)
             await db.commit()
     except Exception as e:
+        logger.exception(f"Generation failed for session {session_id}: {e}")
+        await on_progress("error", str(e))
         async with get_session() as db:
             session = await db.get(Session, session_id)
             if session:
                 session.status = "error"
+                session.error_message = str(e)
                 await db.commit()
 
 

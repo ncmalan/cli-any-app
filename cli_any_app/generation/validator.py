@@ -20,14 +20,14 @@ def validate_generated_cli(package_dir: Path) -> dict:
         if not (package_dir / f).exists():
             errors.append(f"Missing required file: {f}")
 
-    # Try to parse the CLI module
-    cli_name = package_dir.name.replace("-", "_")
-    cli_module = package_dir / cli_name / "cli.py"
-    if cli_module.exists():
-        try:
-            ast.parse(cli_module.read_text())
-        except SyntaxError as e:
-            errors.append(f"CLI module parse error: {e}")
+    # Find cli.py anywhere in the package
+    cli_modules = list(package_dir.rglob("cli.py"))
+    if cli_modules:
+        for cli_module in cli_modules:
+            try:
+                ast.parse(cli_module.read_text())
+            except SyntaxError as e:
+                errors.append(f"CLI module parse error in {cli_module.relative_to(package_dir)}: {e}")
     else:
         errors.append("cli.py not found in package")
 

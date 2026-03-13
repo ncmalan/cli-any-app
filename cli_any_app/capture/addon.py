@@ -1,5 +1,6 @@
 """mitmproxy addon - loaded by mitmdump: mitmdump -s addon.py --set server_url=http://localhost:8000"""
-import requests
+import json
+import urllib.request
 from mitmproxy import http, ctx
 
 
@@ -38,7 +39,14 @@ class CaptureAddon:
                 "response_body": response.get_text(strict=False),
                 "content_type": content_type,
             }
-            requests.post(f"{self.server_url}/api/internal/capture", json=payload, timeout=5)
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                f"{self.server_url}/api/internal/capture",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=5)
         except Exception as e:
             ctx.log.warn(f"cli-any-app capture error: {e}")
 

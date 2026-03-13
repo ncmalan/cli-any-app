@@ -27,8 +27,12 @@ class ProxyManager:
 
     def stop(self):
         if self.process and self.process.poll() is None:
-            self.process.send_signal(signal.SIGINT)
-            self.process.wait(timeout=10)
+            self.process.send_signal(signal.SIGTERM)
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=5)
             self.process = None
 
     @property

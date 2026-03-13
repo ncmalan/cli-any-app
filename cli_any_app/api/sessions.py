@@ -21,6 +21,7 @@ class SessionResponse(BaseModel):
     app_name: str
     status: str
     proxy_port: int
+    error_message: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

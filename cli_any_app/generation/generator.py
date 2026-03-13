@@ -72,7 +72,7 @@ def get_client() -> anthropic.AsyncAnthropic:
     return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 
-async def generate_cli_package(api_spec: dict, output_dir: Path) -> Path:
+async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=None) -> Path:
     app_name = api_spec.get("app_name", "generated-cli")
     cli_name = app_name.replace(" ", "-").lower()
     package_name = cli_name.replace("-", "_")
@@ -104,6 +104,9 @@ async def generate_cli_package(api_spec: dict, output_dir: Path) -> Path:
     # Step 2: Generate CLI code via Claude
     client = get_client()
 
+    if on_progress:
+        await on_progress("generating", "Generating CLI code...")
+
     code_response = await client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=16384,
@@ -127,8 +130,13 @@ async def generate_cli_package(api_spec: dict, output_dir: Path) -> Path:
         out_file = package_dir / filepath
         out_file.parent.mkdir(parents=True, exist_ok=True)
         out_file.write_text(content)
+        if on_progress:
+            await on_progress("generating", f"Wrote {filepath}")
 
     # Step 3: Generate SKILL.md via Claude
+    if on_progress:
+        await on_progress("generating", "Generating SKILL.md...")
+
     skill_response = await client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=4096,

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, DateTime, Integer
+from sqlalchemy import String, DateTime, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from cli_any_app.models.database import Base
@@ -15,6 +15,7 @@ class Session(Base):
     app_name: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, default="stopped")
     proxy_port: Mapped[int] = mapped_column(Integer, default=8080)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

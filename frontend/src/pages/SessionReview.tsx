@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   getSession, listFlows, listDomains, deleteFlow,
-  toggleDomain, startGeneration,
+  toggleDomain, startGeneration, getApiKeyStatus, setApiKey,
 } from '../lib/api'
 import type { Session, Flow, DomainInfo } from '../lib/api'
 import MethodBadge from '../components/MethodBadge'
@@ -43,25 +43,44 @@ export default function SessionReview() {
   const [expandedRequest, setExpandedRequest] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [hasApiKey, setHasApiKey] = useState(false)
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [savingKey, setSavingKey] = useState(false)
 
   useEffect(() => {
     if (!id) return
     async function load() {
       try {
-        const [s, f, d] = await Promise.all([
+        const [s, f, d, keyStatus] = await Promise.all([
           getSession(id!),
           listFlows(id!),
           listDomains(id!),
+          getApiKeyStatus(),
         ])
         setSession(s)
         setFlows(f)
         setDomains(d)
+        setHasApiKey(keyStatus.has_key)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load session')
       }
     }
     load()
   }, [id])
+
+  const handleSaveApiKey = useCallback(async () => {
+    if (!apiKeyInput.trim()) return
+    setSavingKey(true)
+    try {
+      const result = await setApiKey(apiKeyInput.trim())
+      setHasApiKey(result.has_key)
+      setApiKeyInput('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save API key')
+    } finally {
+      setSavingKey(false)
+    }
+  }, [apiKeyInput])
 
   const handleExpandFlow = useCallback(async (flowId: string) => {
     if (expandedFlow === flowId) {
@@ -132,13 +151,45 @@ export default function SessionReview() {
             <p className="text-sm text-gray-400 mt-1">{session.app_name}</p>
           )}
         </div>
-        <button
-          onClick={handleGenerate}
-          disabled={generating || flows.length === 0}
-          className="bg-blue-600 px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {generating ? 'Starting...' : 'Generate CLI'}
-        </button>
+        <div className="flex flex-col items-end gap-3">
+          <button
+            onClick={() => navigate(`/session/${id}/record`)}
+            className="px-4 py-2 text-sm border border-gray-700 rounded-lg hover:bg-gray-800 transition-colors"
+          >
+            + Add More Flows
+          </button>
+          <div className="flex flex-col items-end gap-2">
+            {!hasApiKey && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  placeholder="Anthropic API Key"
+                  value={apiKeyInput}
+                  onChange={e => setApiKeyInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSaveApiKey()}
+                  className="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm w-64 focus:outline-none focus:border-blue-500"
+                />
+                <button
+                  onClick={handleSaveApiKey}
+                  disabled={savingKey || !apiKeyInput.trim()}
+                  className="bg-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-600 transition-colors disabled:opacity-50"
+                >
+                  {savingKey ? 'Saving...' : 'Set Key'}
+                </button>
+              </div>
+            )}
+            {hasApiKey && (
+              <span className="text-xs text-green-400">API key configured</span>
+            )}
+            <button
+              onClick={handleGenerate}
+              disabled={generating || flows.length === 0 || !hasApiKey}
+              className="bg-blue-600 px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {generating ? 'Starting...' : 'Generate CLI'}
+            </button>
+          </div>
+        </div>
       </div>
 
       {error && (

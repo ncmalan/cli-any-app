@@ -20,6 +20,8 @@ export default function Recording() {
   const [flowInput, setFlowInput] = useState('')
   const [showFlowInput, setShowFlowInput] = useState(false)
   const [error, setError] = useState('')
+  const [showStopConfirm, setShowStopConfirm] = useState(false)
+  const [stopping, setStopping] = useState(false)
 
   const trafficRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -120,16 +122,28 @@ export default function Recording() {
 
   const handleStopRecording = useCallback(async () => {
     if (!id) return
+    if (activeFlow && !showStopConfirm) {
+      setShowStopConfirm(true)
+      return
+    }
+    setStopping(true)
+    setShowStopConfirm(false)
     try {
       if (activeFlow) {
-        await stopFlow(id, activeFlow.id)
+        try {
+          await stopFlow(id, activeFlow.id)
+        } catch {
+          // Continue even if stopping the flow fails
+        }
+        setActiveFlow(null)
       }
       await stopRecording(id)
       navigate(`/session/${id}/review`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to stop recording')
+      setStopping(false)
     }
-  }, [id, activeFlow, navigate])
+  }, [id, activeFlow, showStopConfirm, navigate])
 
   const handleToggleDomain = useCallback(async (domain: string, enabled: boolean) => {
     if (!id) return
@@ -169,12 +183,32 @@ export default function Recording() {
           >
             Domains {domains.length > 0 && `(${domains.length})`}
           </button>
-          <button
-            onClick={handleStopRecording}
-            className="px-4 py-1.5 text-sm bg-red-600 rounded hover:bg-red-700 transition-colors font-medium"
-          >
-            Stop Recording
-          </button>
+          {showStopConfirm ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-yellow-400">Stop active flow and recording?</span>
+              <button
+                onClick={handleStopRecording}
+                disabled={stopping}
+                className="px-3 py-1.5 text-sm bg-red-600 rounded hover:bg-red-700 transition-colors font-medium disabled:opacity-50"
+              >
+                {stopping ? 'Stopping...' : 'Yes, Stop'}
+              </button>
+              <button
+                onClick={() => setShowStopConfirm(false)}
+                className="px-3 py-1.5 text-sm bg-gray-700 rounded hover:bg-gray-600 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleStopRecording}
+              disabled={stopping}
+              className="px-4 py-1.5 text-sm bg-red-600 rounded hover:bg-red-700 transition-colors font-medium disabled:opacity-50"
+            >
+              {stopping ? 'Stopping...' : 'Stop Recording'}
+            </button>
+          )}
         </div>
       </div>
 

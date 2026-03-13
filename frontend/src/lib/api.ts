@@ -15,6 +15,7 @@ export interface Session {
   app_name: string
   status: string
   proxy_port: number
+  error_message: string | null
   created_at: string
 }
 
@@ -118,6 +119,15 @@ export async function toggleDomain(sessionId: string, domain: string, enabled: b
 // Generation
 export async function startGeneration(sessionId: string): Promise<void> {
   await fetchJson(`/sessions/${sessionId}/generate`, { method: 'POST' })
+}
+
+// Settings
+export async function getApiKeyStatus(): Promise<{ has_key: boolean }> {
+  return fetchJson('/settings')
+}
+
+export async function setApiKey(api_key: string): Promise<{ has_key: boolean }> {
+  return fetchJson('/settings', { method: 'PUT', body: JSON.stringify({ api_key }) })
 }
 
 // Requests (for review page)
