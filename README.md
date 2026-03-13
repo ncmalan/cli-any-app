@@ -10,7 +10,16 @@ Captures API calls via mitmproxy while you drive a mobile app, lets you label th
 
 - Python 3.11+
 - Node.js 18+
-- mitmproxy (`brew install mitmproxy`)
+- mitmproxy
+
+**macOS:**
+```bash
+brew install python@3.11  # or newer
+brew install node
+brew install mitmproxy
+```
+
+> **Note:** Install mitmproxy via brew, not pip. mitmproxy is a system tool (like curl or git) — installing it via brew keeps its large dependency tree separate from your project's virtual environment and ensures `mitmdump` is available on your PATH.
 
 ### Setup
 
