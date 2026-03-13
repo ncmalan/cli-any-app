@@ -36,7 +36,8 @@ async def run_pipeline(
 
     # Step 3: Generate
     await emit("generating", "Generating CLI package with Claude...")
-    package_path = await generate_cli_package(api_spec, output_dir, on_progress=on_progress)
+    session_name = session_data.get("session_name", "")
+    package_path = await generate_cli_package(api_spec, output_dir, on_progress=on_progress, session_name=session_name)
     await emit("generating", f"Package written to {package_path}")
 
     # Step 4: Validate

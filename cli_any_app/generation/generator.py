@@ -72,11 +72,20 @@ def get_client() -> anthropic.AsyncAnthropic:
     return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 
-async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=None) -> Path:
+async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=None, session_name: str = "") -> Path:
     app_name = api_spec.get("app_name", "generated-cli")
     cli_name = app_name.replace(" ", "-").lower()
     package_name = cli_name.replace("-", "_")
-    package_dir = output_dir / cli_name
+
+    # Use session name as subfolder if provided, otherwise timestamp, to avoid overwrites
+    if session_name:
+        folder_name = f"{cli_name}_{session_name.replace(' ', '-').lower()}"
+    else:
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        folder_name = f"{cli_name}_{ts}"
+
+    package_dir = output_dir / folder_name
     package_dir.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Generate boilerplate from Jinja templates
@@ -108,7 +117,7 @@ async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=Non
         await on_progress("generating", "Generating CLI code...")
 
     code_response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=16384,
         messages=[
             {
@@ -138,7 +147,7 @@ async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=Non
         await on_progress("generating", "Generating SKILL.md...")
 
     skill_response = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=4096,
         messages=[
             {
