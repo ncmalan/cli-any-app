@@ -115,10 +115,10 @@ Each generated CLI includes:
 
 ```bash
 # Example: using a generated CLI for a food delivery app
-sixty60 auth login --email user@example.com --password ****
-sixty60 catalog search --query "milk"
-sixty60 cart add --item-id 12345 --quantity 1
-sixty60 orders list
+myapp auth login --email user@example.com --password ****
+myapp catalog search --query "milk"
+myapp cart add --item-id 12345 --quantity 1
+myapp orders list
 ```
 
 ## Architecture
