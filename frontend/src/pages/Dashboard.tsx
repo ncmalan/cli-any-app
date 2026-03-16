@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { listSessions, deleteSession } from '../lib/api'
-import type { Session } from '../lib/api'
+import { listSessions, deleteSession, listNetworkInterfaces } from '../lib/api'
+import type { Session, NetworkInterface } from '../lib/api'
 import StatusBadge from '../components/StatusBadge'
 import QRCode from 'react-qr-code'
 
@@ -31,6 +31,8 @@ export default function Dashboard() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [showSetup, setShowSetup] = useState(false)
   const [setupTab, setSetupTab] = useState<'ios' | 'android'>('ios')
+  const [interfaces, setInterfaces] = useState<NetworkInterface[]>([])
+  const [selectedIp, setSelectedIp] = useState('')
 
   async function load() {
     try {
@@ -42,6 +44,17 @@ export default function Dashboard() {
   }
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    if (showSetup && interfaces.length === 0) {
+      listNetworkInterfaces().then(ifaces => {
+        setInterfaces(ifaces)
+        if (ifaces.length > 0 && !selectedIp) {
+          setSelectedIp(ifaces[0].ip)
+        }
+      }).catch(() => {})
+    }
+  }, [showSetup])
 
   async function handleDelete(id: string) {
     await deleteSession(id)
@@ -75,15 +88,40 @@ export default function Dashboard() {
 
           {/* QR Code and cert download */}
           <div className="flex gap-8 items-start mb-6">
-            <div className="bg-white p-3 rounded-lg shrink-0">
-              <QRCode value={`${window.location.origin}/api/cert`} size={128} />
+            <div className="flex flex-col items-center gap-2 shrink-0">
+              <div className="bg-white p-3 rounded-lg">
+                <QRCode
+                  value={selectedIp ? `http://${selectedIp}:${window.location.port || '8000'}/api/cert` : `${window.location.origin}/api/cert`}
+                  size={128}
+                />
+              </div>
+              {interfaces.length > 1 && (
+                <select
+                  value={selectedIp}
+                  onChange={e => setSelectedIp(e.target.value)}
+                  className="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 w-full"
+                >
+                  {interfaces.map(iface => (
+                    <option key={iface.ip} value={iface.ip}>
+                      {iface.ip} ({iface.interface})
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="space-y-2 text-sm text-gray-400">
               <p className="text-gray-200 font-medium">1. Download the CA Certificate</p>
               <p>Scan the QR code with your device camera, or open this URL in your device's browser:</p>
               <code className="block text-blue-400 bg-gray-950 px-3 py-1.5 rounded text-xs">
-                {window.location.origin}/api/cert
+                {selectedIp ? `http://${selectedIp}:${window.location.port || '8000'}/api/cert` : `${window.location.origin}/api/cert`}
               </code>
+              {selectedIp && (
+                <div className="mt-3 bg-gray-950 rounded p-3 space-y-1">
+                  <p className="text-gray-200 font-medium text-xs">Proxy Settings for your device:</p>
+                  <p>Server: <code className="text-blue-400">{selectedIp}</code></p>
+                  <p>Port: <code className="text-blue-400">8080</code></p>
+                </div>
+              )}
             </div>
           </div>
 

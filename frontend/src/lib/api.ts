@@ -121,6 +121,16 @@ export async function startGeneration(sessionId: string): Promise<void> {
   await fetchJson(`/sessions/${sessionId}/generate`, { method: 'POST' })
 }
 
+// Network
+export interface NetworkInterface {
+  interface: string
+  ip: string
+}
+
+export async function listNetworkInterfaces(): Promise<NetworkInterface[]> {
+  return fetchJson('/network/interfaces')
+}
+
 // Settings
 export async function getApiKeyStatus(): Promise<{ has_key: boolean }> {
   return fetchJson('/settings')
