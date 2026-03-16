@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.jpeg" alt="cli-any-app banner" width="100%">
+</p>
+
 # cli-any-app
 
 **Transform mobile app network traffic into agent-usable CLI tools.**
