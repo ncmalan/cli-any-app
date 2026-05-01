@@ -9,6 +9,8 @@ import venv
 from pathlib import Path
 
 ALLOWED_DEPENDENCIES = {"click", "httpx"}
+ALLOWED_BUILD_BACKENDS = {"setuptools.build_meta"}
+ALLOWED_BUILD_DEPENDENCIES = {"setuptools", "wheel"}
 UNSAFE_IMPORTS = {"subprocess", "socket", "ftplib", "telnetlib", "pickle", "marshal"}
 UNSAFE_CALLS = {"eval", "exec", "compile", "__import__"}
 SAFE_PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -39,6 +41,7 @@ def validate_generated_cli(package_dir: Path, *, run_smoke: bool = False) -> dic
             name = project.get("name", "")
             if not SAFE_PROJECT_NAME.match(name):
                 errors.append(f"Unsafe project name: {name}")
+            _validate_build_system(metadata, errors)
             for dep in project.get("dependencies", []):
                 dep_name = re.split(r"[<>=!~; \[]", dep, maxsplit=1)[0].lower()
                 if dep_name and dep_name not in ALLOWED_DEPENDENCIES:
@@ -97,9 +100,30 @@ def _check_ast_safety(tree: ast.AST, rel_path: Path, errors: list[str]) -> None:
                     errors.append(f"Unsafe call in {rel_path}: os.system")
 
 
+def _validate_build_system(metadata: dict, errors: list[str], *, required: bool = False) -> None:
+    build_system = metadata.get("build-system")
+    if not build_system:
+        if required:
+            errors.append("Smoke test requires an explicit build-system")
+        return
+
+    backend = build_system.get("build-backend", "")
+    if backend not in ALLOWED_BUILD_BACKENDS:
+        errors.append(f"Build backend not allowed: {backend or 'missing'}")
+
+    for requirement in build_system.get("requires", []):
+        dep_name = re.split(r"[<>=!~; \[]", requirement, maxsplit=1)[0].lower()
+        if dep_name and dep_name not in ALLOWED_BUILD_DEPENDENCIES:
+            errors.append(f"Build dependency not allowed: {dep_name}")
+
+
 def _run_isolated_smoke_test(package_dir: Path, errors: list[str], warnings: list[str]) -> None:
     pyproject = package_dir / "pyproject.toml"
     metadata = tomllib.loads(pyproject.read_text())
+    _validate_build_system(metadata, errors, required=True)
+    if errors:
+        return
+
     scripts = metadata.get("project", {}).get("scripts", {})
     if not scripts:
         warnings.append("Smoke test skipped: no console script declared")
@@ -118,6 +142,9 @@ def _run_isolated_smoke_test(package_dir: Path, errors: list[str], warnings: lis
                 "pip",
                 "install",
                 "--disable-pip-version-check",
+                "--no-build-isolation",
+                "--no-deps",
+                "--no-index",
                 str(package_dir),
             ],
             text=True,

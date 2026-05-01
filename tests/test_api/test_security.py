@@ -3,7 +3,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 @pytest.fixture(autouse=True)
-async def secure_db(tmp_path):
+async def secure_db(tmp_path, regulated_test_settings):
     from cli_any_app.config import settings
     from cli_any_app.models.database import init_db
 

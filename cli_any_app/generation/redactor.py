@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -14,6 +15,8 @@ from cli_any_app.capture.privacy import (
     PHI_PATTERNS,
     stable_placeholder,
 )
+
+REDACTED_PLACEHOLDER = re.compile(r"<[A-Z_]+:[0-9a-f]{10}>")
 
 
 def redact_sensitive_data(data: dict) -> dict:
@@ -88,6 +91,6 @@ def redact_query(query: str) -> str:
 
 def has_unredacted_sensitive_data(data: dict) -> bool:
     text = json.dumps(data, default=str)
-    if REDACTED in text or "<EMAIL:" in text or "<PHONE:" in text:
-        text = text.replace(REDACTED, "")
+    text = REDACTED_PLACEHOLDER.sub("", text)
+    text = text.replace(REDACTED_TOKEN, "").replace(REDACTED, "")
     return any(pattern.search(text) for pattern, _label in PHI_PATTERNS)

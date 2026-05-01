@@ -1,4 +1,4 @@
-from cli_any_app.generation.redactor import redact_sensitive_data
+from cli_any_app.generation.redactor import has_unredacted_sensitive_data, redact_sensitive_data
 
 
 def test_redacts_bearer_tokens():
@@ -42,3 +42,23 @@ def test_does_not_mutate_original():
     result = redact_sensitive_data(data)
     assert data["flows"][0]["requests"][0]["request_body"]["password"] == "secret"
     assert result["flows"][0]["requests"][0]["request_body"]["password"] == "<REDACTED>"
+
+
+def test_preflight_ignores_redacted_placeholders():
+    data = {
+        "flows": [{"requests": [{
+            "request_body": {
+                "patient_id": "<PATIENT_ID:1234567890>",
+                "email": "<EMAIL:abcdef1234>",
+                "phone": "<PHONE:abcdef1234>",
+            }
+        }]}]
+    }
+
+    assert has_unredacted_sensitive_data(data) is False
+
+
+def test_preflight_flags_unredacted_sensitive_data():
+    data = {"value": "patient_id=ABCD1234"}
+
+    assert has_unredacted_sensitive_data(data) is True
