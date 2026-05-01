@@ -1,4 +1,3 @@
-from pathlib import Path
 from cli_any_app.generation.validator import validate_generated_cli
 
 

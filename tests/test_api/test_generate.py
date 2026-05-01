@@ -5,7 +5,9 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from cli_any_app.api.generate import _run_generation
+from cli_any_app.models.audit_event import AuditEvent
 from cli_any_app.models.generated_cli import GeneratedCLI
+from cli_any_app.models.generation_attempt import GenerationAttempt
 from cli_any_app.models.session import Session
 
 
@@ -133,3 +135,61 @@ async def test_run_generation_upserts_generated_cli(tmp_path):
         assert session is not None
         assert session.status == "complete"
         assert session.error_message is None
+
+
+async def test_approve_generation_attempt_requires_validated_success(client):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app")
+        db.add(session)
+        await db.flush()
+        attempt = GenerationAttempt(
+            session_id=session.id,
+            status="complete",
+            validation_report_json='{"valid": true, "errors": [], "warnings": []}',
+            package_path="/tmp/generated/test",
+            approval_status="pending",
+        )
+        db.add(attempt)
+        await db.commit()
+        session_id = session.id
+        attempt_id = attempt.id
+
+    resp = await client.post(
+        f"/api/sessions/{session_id}/generation-attempts/{attempt_id}/approve",
+        json={"reason": "Reviewed generated files and validation report"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["approval_status"] == "approved"
+
+    async with get_session() as db:
+        approved = await db.get(GenerationAttempt, attempt_id)
+        assert approved.approval_status == "approved"
+        events = await db.execute(select(AuditEvent).where(AuditEvent.event_type == "generation.approved"))
+        assert len(events.scalars().all()) == 1
+
+
+async def test_approve_generation_attempt_rejects_failed_validation(client):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app")
+        db.add(session)
+        await db.flush()
+        attempt = GenerationAttempt(
+            session_id=session.id,
+            status="validation_failed",
+            validation_report_json='{"valid": false, "errors": ["bad"], "warnings": []}',
+            approval_status="pending",
+        )
+        db.add(attempt)
+        await db.commit()
+        session_id = session.id
+        attempt_id = attempt.id
+
+    resp = await client.post(
+        f"/api/sessions/{session_id}/generation-attempts/{attempt_id}/approve",
+        json={"reason": "Trying to approve failed output"},
+    )
+    assert resp.status_code == 409

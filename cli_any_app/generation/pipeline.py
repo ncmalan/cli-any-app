@@ -42,7 +42,10 @@ async def run_pipeline(
 
     # Step 4: Validate
     await emit("validating", "Validating generated package...")
-    validation = validate_generated_cli(package_path)
+    validation = validate_generated_cli(
+        package_path,
+        run_smoke=settings.generated_smoke_test_enabled,
+    )
     if validation["valid"]:
         await emit("validating", "Validation passed!")
     else:

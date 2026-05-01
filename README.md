@@ -44,7 +44,7 @@ Most mobile apps are closed-source — you can't read their code to understand t
 ### Prerequisites
 
 - Python 3.11+
-- Node.js 18+
+- Node.js 20.19+
 - mitmproxy
 
 **macOS:**
@@ -80,7 +80,7 @@ export CLI_ANY_APP_ANTHROPIC_API_KEY=your-key-here
 
 # Build the frontend
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
 
@@ -90,12 +90,17 @@ cli-any-app
 
 The web UI is available at http://localhost:8000.
 
+On first run, the app creates a local admin password and stores only its hash under
+`data/secrets/`. The one-time bootstrap password is written to
+`data/secrets/bootstrap-admin-password.txt`; remove that file after signing in and
+storing the password securely.
+
 ## Usage
 
-1. Open the web UI at http://localhost:8000
+1. Open the web UI at http://localhost:8000 and sign in with the local admin password
 2. Click **Device Setup** for instructions on configuring your phone's proxy and installing the mitmproxy CA certificate (iOS and Android instructions provided)
 3. Create a new session — name it and specify the app name
-4. Click **Start Recording**, then open the target app on your phone
+4. Click **Start Capture**, then open the target app on your phone
 5. Use **Start Flow** / **Stop Flow** to label actions as you navigate the app (e.g., "login", "search", "add to cart")
 6. Use the domain filter to exclude irrelevant traffic (analytics, ads, etc.)
 7. Stop recording when done, then review the captured flows
@@ -146,7 +151,7 @@ cli_any_app/
 │   └── websocket.py  # Live traffic + generation progress streaming
 ├── generation/       # AI-powered CLI generation pipeline
 │   ├── normalizer.py # Cleans and structures raw traffic
-│   ├── redactor.py   # Strips PII/secrets before sending to Claude
+│   ├── redactor.py   # Redacts known sensitive patterns before Claude calls
 │   ├── analyzer.py   # Agentic tool-use loop for API analysis
 │   ├── generator.py  # Claude generates Click CLI + SKILL.md
 │   ├── validator.py  # Syntax and structure validation
@@ -155,7 +160,7 @@ cli_any_app/
 ├── models/           # SQLAlchemy async models
 └── main.py           # FastAPI app + lifespan
 
-frontend/             # React 18 + TypeScript + Vite + Tailwind CSS
+frontend/             # React 19 + TypeScript + Vite + Tailwind CSS
 ├── src/
 │   ├── pages/        # Dashboard, SessionSetup, Recording, Review, Generation
 │   ├── components/   # StatusBadge, MethodBadge
@@ -167,7 +172,9 @@ frontend/             # React 18 + TypeScript + Vite + Tailwind CSS
 - **Agentic analysis** — The analyzer gives Claude tools to browse traffic incrementally (`list_flows`, `get_flow_requests`, `get_request_detail`, `submit_api_spec`) instead of dumping everything into one prompt. This handles apps with heavy traffic without hitting token limits.
 - **mitmproxy via subprocess** — mitmdump runs as a child process with a custom addon, keeping the proxy's dependency tree separate from the app.
 - **WebSocket streaming** — Both live traffic capture and generation progress are streamed to the UI in real-time.
-- **PII redaction** — Sensitive headers (Authorization, cookies) and body fields (passwords, tokens) are redacted before sending traffic to Claude.
+- **Metadata-first capture** — Raw request/response bodies are disabled by default. The database stores method, redacted URL/query, host, content type, status, body sizes, and body hashes.
+- **Redaction and gating** — Sensitive headers and query secrets are redacted before database write, and generation is blocked unless enabled API requests pass the redaction preflight. This is a safety baseline, not a guarantee that arbitrary medical traces are fully de-identified.
+- **Local regulated MVP** — The default posture is single-operator local use. Hosted, shared, or multi-user deployment requires additional controls beyond this README.
 
 ## Configuration
 
@@ -175,10 +182,13 @@ All settings can be overridden via environment variables with the `CLI_ANY_APP_`
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CLI_ANY_APP_HOST` | `0.0.0.0` | Server bind address |
+| `CLI_ANY_APP_HOST` | `127.0.0.1` | Server bind address |
 | `CLI_ANY_APP_PORT` | `8000` | Server port |
 | `CLI_ANY_APP_PROXY_PORT` | `8080` | mitmproxy listen port |
 | `CLI_ANY_APP_DEBUG` | `false` | Enable debug mode with auto-reload |
+| `CLI_ANY_APP_ALLOW_LAN` | `false` | Required to bind the web server to a LAN address |
+| `CLI_ANY_APP_ADMIN_PASSWORD` | *(generated on first run)* | Initial local operator password |
+| `CLI_ANY_APP_RAW_BODY_CAPTURE_ENABLED` | `false` | Store encrypted raw payloads and redacted samples |
 | `CLI_ANY_APP_ANTHROPIC_API_KEY` | *(required for generation)* | Anthropic API key for Claude |
 
 Example `.env` file:
@@ -188,14 +198,62 @@ CLI_ANY_APP_ANTHROPIC_API_KEY=sk-ant-...
 
 The API key can also be set at runtime through the web UI on the session review page.
 
+## Regulated Local Mode
+
+Use this project as a local single-operator tool until a separate hosted deployment
+review is complete. The web server binds to loopback by default; LAN exposure requires
+`CLI_ANY_APP_ALLOW_LAN=true` and should be limited to trusted networks.
+
+Raw body capture is opt-in. Default capture stores metadata, redacted URLs/headers,
+body sizes, and SHA-256 body hashes. If raw body capture is enabled, payloads are
+encrypted with a local data key under `data/secrets/` and raw reveal requires an
+authenticated action with a reason that is written to the audit log.
+
+Generated CLIs are untrusted artifacts until validation passes and a human approves
+the output in the generation screen. Install instructions are hidden until that
+approval is recorded. Do not install generated packages against production systems
+without reviewing dependencies, imports, command behavior, and package metadata.
+
+Operational defaults:
+
+- Retention defaults to 30 days per session. Run `POST /api/retention/purge`
+  as an authenticated local operator to hard-delete expired sessions and write
+  purge audit events. Set `CLI_ANY_APP_RETENTION_PURGE_ON_STARTUP=true` to run
+  this purge during app startup.
+- Remove mobile proxy settings and the mitmproxy CA certificate from devices after
+  each capture engagement.
+- Back up `data/secrets/` with the database if encrypted payload reveal is required
+  later; losing the local data key makes encrypted raw payloads unrecoverable.
+- Non-local deployment needs TLS, stronger identity, authorization separation,
+  centralized audit retention, backup policy, key management, and compliance review.
+
+### Database Migrations
+
+Alembic migrations are the production schema path. Runtime `create_all` remains
+enabled by default for local development and tests; set `CLI_ANY_APP_DB_CREATE_ALL=false`
+after applying migrations in a controlled environment.
+
+```bash
+source .venv/bin/activate
+alembic upgrade head
+```
+
 ## Testing
 
 ```bash
 source .venv/bin/activate
 pytest tests/ -v
+
+cd frontend
+npm ci
+npm run lint
+npm run test
+npm run build
 ```
 
 Tests use in-memory SQLite and mock the Claude API. No external services needed.
+Frontend tests use Vitest, React Testing Library, MSW, and axe checks for the
+regulated capture/review workflow.
 
 ### Frontend Development
 
@@ -232,7 +290,7 @@ Contributions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Make your changes with tests
-4. Run `pytest tests/ -v` and `cd frontend && npm run build` to verify
+4. Run `pytest tests/ -v` plus `cd frontend && npm run lint && npm run test && npm run build` to verify
 5. Submit a pull request
 
 ## License

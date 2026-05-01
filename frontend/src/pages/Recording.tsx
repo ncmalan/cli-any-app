@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   getSession, startRecording, stopRecording,
   createFlow, stopFlow, listFlows, listDomains, toggleDomain,
+  getWsToken,
 } from '../lib/api'
 import type { Session, Flow, DomainInfo, TrafficEvent } from '../lib/api'
 import MethodBadge from '../components/MethodBadge'
@@ -22,19 +23,18 @@ export default function Recording() {
   const [error, setError] = useState('')
   const [showStopConfirm, setShowStopConfirm] = useState(false)
   const [stopping, setStopping] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [wsState, setWsState] = useState<'idle' | 'connecting' | 'connected' | 'disconnected'>('idle')
 
   const trafficRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
 
-  // Load session and start recording
+  // Load session. Recording starts only from the explicit Start Capture action.
   useEffect(() => {
     if (!id) return
     async function init() {
       try {
-        let s = await getSession(id!)
-        if (s.status === 'created' || s.status === 'stopped') {
-          s = await startRecording(id!)
-        }
+        const s = await getSession(id!)
         setSession(s)
         const flowList = await listFlows(id!)
         setFlows(flowList)
@@ -49,27 +49,53 @@ export default function Recording() {
 
   // WebSocket connection
   useEffect(() => {
-    if (!id) return
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws/traffic/${id}`)
-    wsRef.current = ws
-
-    ws.onmessage = (event) => {
+    if (!id || session?.status !== 'recording') {
+      setWsState('idle')
+      return
+    }
+    let cancelled = false
+    setWsState('connecting')
+    async function connect() {
       try {
-        const data = JSON.parse(event.data) as TrafficEvent
-        setTraffic(prev => [...prev, data])
+        const token = await getWsToken()
+        if (cancelled) return
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        const ws = new WebSocket(`${proto}//${window.location.host}/ws/traffic/${id}?token=${encodeURIComponent(token)}`)
+        wsRef.current = ws
+
+        ws.onopen = () => setWsState('connected')
+        ws.onclose = () => setWsState('disconnected')
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data) as TrafficEvent
+            setTraffic(prev => [...prev.slice(-499), data])
+          } catch {
+            // ignore parse errors
+          }
+        }
       } catch {
-        // ignore parse errors
+        setWsState('disconnected')
       }
     }
-
-    ws.onerror = () => {
-      // silently handle
-    }
-
+    connect()
     return () => {
-      ws.close()
+      cancelled = true
+      wsRef.current?.close()
       wsRef.current = null
+    }
+  }, [id, session?.status])
+
+  const handleStartRecording = useCallback(async () => {
+    if (!id) return
+    setStarting(true)
+    setError('')
+    try {
+      const updated = await startRecording(id)
+      setSession(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start recording')
+    } finally {
+      setStarting(false)
     }
   }, [id])
 
@@ -97,7 +123,7 @@ export default function Recording() {
   }, [id])
 
   const handleStartFlow = useCallback(async () => {
-    if (!id || !flowInput.trim()) return
+    if (!id || !flowInput.trim() || session?.status !== 'recording') return
     try {
       const flow = await createFlow(id, flowInput.trim())
       setActiveFlow(flow)
@@ -107,7 +133,7 @@ export default function Recording() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create flow')
     }
-  }, [id, flowInput])
+  }, [id, flowInput, session?.status])
 
   const handleStopFlow = useCallback(async () => {
     if (!id || !activeFlow) return
@@ -172,18 +198,27 @@ export default function Recording() {
           <h1 className="font-semibold text-lg">{session?.name ?? 'Loading...'}</h1>
           {session && (
             <span className="text-sm text-gray-400">
-              {session.app_name} &middot; proxy :{session.proxy_port}
+              {session.app_name} &middot; {session.status} &middot; proxy :{session.proxy_port}
             </span>
           )}
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowDomains(!showDomains)}
+            aria-pressed={showDomains}
             className="px-3 py-1.5 text-sm border border-gray-700 rounded hover:bg-gray-800 transition-colors"
           >
             Domains {domains.length > 0 && `(${domains.length})`}
           </button>
-          {showStopConfirm ? (
+          {session?.status !== 'recording' ? (
+            <button
+              onClick={handleStartRecording}
+              disabled={starting}
+              className="px-4 py-1.5 text-sm bg-green-600 rounded hover:bg-green-700 transition-colors font-medium disabled:opacity-50"
+            >
+              {starting ? 'Starting...' : 'Start Capture'}
+            </button>
+          ) : showStopConfirm ? (
             <div className="flex items-center gap-2">
               <span className="text-xs text-yellow-400">Stop active flow and recording?</span>
               <button
@@ -213,7 +248,7 @@ export default function Recording() {
       </div>
 
       {error && (
-        <div className="mx-6 mt-3 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded p-2">
+        <div role="alert" className="mx-6 mt-3 text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded p-2">
           {error}
         </div>
       )}
@@ -252,7 +287,7 @@ export default function Recording() {
                 <div className="flex gap-2">
                   <button
                     onClick={handleStartFlow}
-                    disabled={!flowInput.trim()}
+                    disabled={!flowInput.trim() || session?.status !== 'recording'}
                     className="flex-1 px-3 py-2 text-sm bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                   >
                     Start
@@ -268,7 +303,8 @@ export default function Recording() {
             ) : (
               <button
                 onClick={() => setShowFlowInput(true)}
-                className="w-full px-3 py-2 text-sm bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                disabled={session?.status !== 'recording'}
+                className="w-full px-3 py-2 text-sm bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50"
               >
                 + Start Flow
               </button>
@@ -300,13 +336,15 @@ export default function Recording() {
             <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider">
               Live Traffic
             </h2>
-            <span className="text-xs text-gray-500">{traffic.length} requests</span>
+            <span className="text-xs text-gray-500">
+              {wsState} · {traffic.length} requests
+            </span>
           </div>
           <div ref={trafficRef} className="flex-1 overflow-y-auto p-2 space-y-0.5 font-mono text-sm">
             {traffic.length === 0 ? (
               <div className="text-center py-12 text-gray-600">
-                <p>Waiting for traffic...</p>
-                <p className="text-xs mt-1">Configure your device to use the proxy</p>
+                <p>{session?.status === 'recording' ? 'Waiting for traffic...' : 'Capture is stopped'}</p>
+                <p className="text-xs mt-1">Start capture before configuring your device proxy.</p>
               </div>
             ) : (
               traffic.map((t, i) => (
@@ -388,6 +426,9 @@ export default function Recording() {
                     </div>
                     <button
                       onClick={() => handleToggleDomain(d.domain, !d.enabled)}
+                      role="switch"
+                      aria-checked={d.enabled}
+                      aria-label={`${d.enabled ? 'Disable' : 'Enable'} ${d.domain}`}
                       className={`w-9 h-5 rounded-full transition-colors shrink-0 ${
                         d.enabled ? 'bg-blue-600' : 'bg-gray-700'
                       }`}

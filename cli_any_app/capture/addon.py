@@ -1,6 +1,8 @@
 """mitmproxy addon - loaded by mitmdump: mitmdump -s addon.py --set server_url=http://localhost:8000"""
 import json
+import os
 import urllib.request
+
 from mitmproxy import http, ctx
 
 
@@ -8,6 +10,7 @@ class CaptureAddon:
     def __init__(self):
         self.server_url = "http://localhost:8000"
         self.session_id = ""
+        self.capture_token = os.environ.get("CLI_ANY_APP_CAPTURE_TOKEN", "")
 
     def load(self, loader):
         loader.add_option("server_url", str, "http://localhost:8000", "FastAPI server URL")
@@ -43,7 +46,10 @@ class CaptureAddon:
             req = urllib.request.Request(
                 f"{self.server_url}/api/internal/capture",
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Capture-Token": self.capture_token,
+                },
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=5)

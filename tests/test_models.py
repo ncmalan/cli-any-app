@@ -46,4 +46,4 @@ async def test_create_session_with_flows_and_requests(setup_db):
         s = result.scalar_one()
         assert s.name == "Test Session"
         assert s.app_name == "test-app"
-        assert s.status == "stopped"
+        assert s.status == "created"

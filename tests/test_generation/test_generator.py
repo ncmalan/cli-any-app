@@ -1,6 +1,5 @@
 import json
 import pytest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 from cli_any_app.generation.generator import generate_cli_package
 

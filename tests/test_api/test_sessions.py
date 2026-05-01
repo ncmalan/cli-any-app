@@ -23,7 +23,7 @@ async def test_create_session(client):
     data = resp.json()
     assert data["name"] == "Test"
     assert data["app_name"] == "test-app"
-    assert data["status"] == "stopped"
+    assert data["status"] == "created"
     assert "id" in data
 
 
@@ -65,7 +65,7 @@ async def test_start_recording_conflict_returns_409(client, monkeypatch):
 
     state = {"running": False, "owner": None}
 
-    def fake_start(session_id, port=None):
+    def fake_start(session_id, port=None, capture_token=None):
         if state["running"] and state["owner"] != session_id:
             raise RuntimeError(f"Proxy already running for session {state['owner']}")
         state["running"] = True
@@ -90,7 +90,7 @@ async def test_stop_recording_other_session_returns_409(client, monkeypatch):
 
     state = {"running": False, "owner": None}
 
-    def fake_start(session_id, port=None):
+    def fake_start(session_id, port=None, capture_token=None):
         state["running"] = True
         state["owner"] = session_id
         return port or 8080

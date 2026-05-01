@@ -35,19 +35,27 @@ async def test_create_flow(client, session_id):
 
 
 async def test_create_flow_auto_order(client, session_id):
-    await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
+    first = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
+    await client.post(f"/api/sessions/{session_id}/flows/{first.json()['id']}/stop")
     resp = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 2"})
     assert resp.json()["order"] == 2
 
 
 async def test_list_flows(client, session_id):
-    await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
+    first = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
+    await client.post(f"/api/sessions/{session_id}/flows/{first.json()['id']}/stop")
     await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 2"})
     resp = await client.get(f"/api/sessions/{session_id}/flows")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
     assert data[0]["order"] < data[1]["order"]
+
+
+async def test_create_flow_rejects_second_active_flow(client, session_id):
+    await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
+    resp = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 2"})
+    assert resp.status_code == 409
 
 
 async def test_stop_flow(client, session_id):

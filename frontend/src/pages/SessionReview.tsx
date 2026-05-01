@@ -16,8 +16,13 @@ interface RequestDetail {
   content_type: string
   request_headers: string
   request_body: string | null
+  request_body_size: number
+  request_body_hash: string | null
   response_headers: string
   response_body: string | null
+  response_body_size: number
+  response_body_hash: string | null
+  redaction_status: string
   is_api: boolean
 }
 
@@ -46,6 +51,9 @@ export default function SessionReview() {
   const [hasApiKey, setHasApiKey] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [savingKey, setSavingKey] = useState(false)
+  const enabledRequestCount = domains
+    .filter(domain => domain.enabled)
+    .reduce((total, domain) => total + domain.request_count, 0)
 
   useEffect(() => {
     if (!id) return
@@ -179,7 +187,7 @@ export default function SessionReview() {
             )}
             <button
               onClick={handleGenerate}
-              disabled={generating || flows.length === 0 || !hasApiKey}
+              disabled={generating || flows.length === 0 || !hasApiKey || enabledRequestCount === 0}
               className="bg-blue-600 px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {generating ? 'Starting...' : 'Generate CLI'}
@@ -189,10 +197,29 @@ export default function SessionReview() {
       </div>
 
       {error && (
-        <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-6">
+        <div role="alert" className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-6">
           {error}
         </div>
       )}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <div className="bg-gray-900 border border-gray-800 rounded p-3">
+          <div className="text-xs text-gray-500">Flows</div>
+          <div className="text-lg font-semibold">{flows.length}</div>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded p-3">
+          <div className="text-xs text-gray-500">Enabled domains</div>
+          <div className="text-lg font-semibold">{domains.filter(d => d.enabled).length}</div>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded p-3">
+          <div className="text-xs text-gray-500">Selected requests</div>
+          <div className="text-lg font-semibold">{enabledRequestCount}</div>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded p-3">
+          <div className="text-xs text-gray-500">Redaction</div>
+          <div className="text-sm font-medium text-green-400">Metadata-first</div>
+        </div>
+      </div>
 
       <div className="flex gap-8">
         {/* Flows panel */}
@@ -209,25 +236,27 @@ export default function SessionReview() {
             <div className="space-y-3">
               {flows.map(f => (
                 <div key={f.id} className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
-                  <div
-                    className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-800/50 transition-colors"
-                    onClick={() => handleExpandFlow(f.id)}
-                  >
-                    <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-between p-4 hover:bg-gray-800/50 transition-colors">
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      onClick={() => handleExpandFlow(f.id)}
+                      aria-expanded={expandedFlow === f.id}
+                    >
                       <span className={`text-gray-500 transition-transform ${expandedFlow === f.id ? 'rotate-90' : ''}`}>
                         &#9654;
                       </span>
-                      <div>
+                      <div className="min-w-0">
                         <div className="font-medium">{f.label}</div>
                         <div className="text-xs text-gray-500">
                           Flow #{f.order}
                           {f.ended_at ? ' \u00b7 completed' : ' \u00b7 in progress'}
                         </div>
                       </div>
-                    </div>
+                    </button>
                     <div className="flex items-center gap-3">
                       {deleteFlowId === f.id ? (
-                        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
                           <span className="text-xs text-red-400">Delete?</span>
                           <button
                             onClick={() => handleDeleteFlow(f.id)}
@@ -244,7 +273,7 @@ export default function SessionReview() {
                         </div>
                       ) : (
                         <button
-                          onClick={e => { e.stopPropagation(); setDeleteFlowId(f.id) }}
+                          onClick={() => setDeleteFlowId(f.id)}
                           className="text-gray-500 hover:text-red-400 text-xs transition-colors"
                         >
                           Delete
@@ -262,9 +291,11 @@ export default function SessionReview() {
                           <div className="space-y-2">
                             {flowRequests[f.id].map(r => (
                               <div key={r.id} className="bg-gray-950 rounded border border-gray-800">
-                                <div
-                                  className="flex items-center gap-2 p-2 cursor-pointer hover:bg-gray-900 transition-colors"
+                                <button
+                                  type="button"
+                                  className="w-full flex items-center gap-2 p-2 text-left hover:bg-gray-900 transition-colors"
                                   onClick={() => setExpandedRequest(expandedRequest === r.id ? null : r.id)}
+                                  aria-expanded={expandedRequest === r.id}
                                 >
                                   <MethodBadge method={r.method} />
                                   <span className="text-sm truncate">{r.url}</span>
@@ -274,12 +305,18 @@ export default function SessionReview() {
                                   }`}>
                                     {r.status_code}
                                   </span>
-                                </div>
+                                </button>
                                 {expandedRequest === r.id && (
                                   <div className="border-t border-gray-800 p-3 space-y-3 text-xs">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-gray-400">
+                                      <div>Request body: {r.request_body_size} bytes</div>
+                                      <div>Response body: {r.response_body_size} bytes</div>
+                                      <div>Redaction: {r.redaction_status}</div>
+                                      <div>Content type: {r.content_type || 'unknown'}</div>
+                                    </div>
                                     {r.request_body && (
                                       <div>
-                                        <div className="text-gray-500 mb-1">Request Body</div>
+                                        <div className="text-gray-500 mb-1">Redacted Request Sample</div>
                                         <pre className="bg-gray-900 p-2 rounded overflow-x-auto text-gray-300 max-h-48 overflow-y-auto">
                                           {tryFormatJson(r.request_body)}
                                         </pre>
@@ -287,14 +324,14 @@ export default function SessionReview() {
                                     )}
                                     {r.response_body && (
                                       <div>
-                                        <div className="text-gray-500 mb-1">Response Body</div>
+                                        <div className="text-gray-500 mb-1">Redacted Response Sample</div>
                                         <pre className="bg-gray-900 p-2 rounded overflow-x-auto text-gray-300 max-h-48 overflow-y-auto">
                                           {tryFormatJson(r.response_body)}
                                         </pre>
                                       </div>
                                     )}
                                     {!r.request_body && !r.response_body && (
-                                      <p className="text-gray-500">No body content</p>
+                                      <p className="text-gray-500">Raw bodies are not stored by default.</p>
                                     )}
                                   </div>
                                 )}
@@ -352,6 +389,9 @@ export default function SessionReview() {
                       </div>
                       <button
                         onClick={() => handleToggleDomain(d.domain, !d.enabled)}
+                        role="switch"
+                        aria-checked={d.enabled}
+                        aria-label={`${d.enabled ? 'Disable' : 'Enable'} ${d.domain}`}
                         className={`w-9 h-5 rounded-full transition-colors shrink-0 ${
                           d.enabled ? 'bg-blue-600' : 'bg-gray-700'
                         }`}

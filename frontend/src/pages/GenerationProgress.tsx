@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getSession } from '../lib/api'
-import type { Session } from '../lib/api'
+import { approveGenerationAttempt, getGenerationStatus, getSession, getWsToken } from '../lib/api'
+import type { GenerationAttempt, Session } from '../lib/api'
 
 const STEPS = ['Normalize', 'Analyze', 'Generate', 'Validate']
 
@@ -65,6 +65,10 @@ export default function GenerationProgress() {
   const [error, setError] = useState('')
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [activeStep, setActiveStep] = useState(0)
+  const [wsState, setWsState] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
+  const [latestAttempt, setLatestAttempt] = useState<GenerationAttempt | null>(null)
+  const [approvalReason, setApprovalReason] = useState('')
+  const [approving, setApproving] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
@@ -75,9 +79,10 @@ export default function GenerationProgress() {
 
     async function poll() {
       try {
-        const s = await getSession(id!)
+        const [s, status] = await Promise.all([getSession(id!), getGenerationStatus(id!)])
         setSession(s)
-        if (s.status === 'complete' || s.status === 'error') {
+        setLatestAttempt(status.latest_attempt)
+        if (['complete', 'error', 'validation_failed'].includes(s.status)) {
           if (intervalRef.current) {
             clearInterval(intervalRef.current)
             intervalRef.current = null
@@ -99,30 +104,42 @@ export default function GenerationProgress() {
   // WebSocket for live progress
   useEffect(() => {
     if (!id) return
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws/generation/${id}`)
-    wsRef.current = ws
-
-    ws.onmessage = (event) => {
+    let cancelled = false
+    async function connect() {
+      setWsState('connecting')
       try {
-        const data = JSON.parse(event.data)
-        const entry: LogEntry = {
-          step: data.step,
-          message: data.message,
-          detail: data.detail,
-          timestamp: new Date(),
-        }
-        setLogs(prev => [...prev, entry])
+        const token = await getWsToken()
+        if (cancelled) return
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        const ws = new WebSocket(`${proto}//${window.location.host}/ws/generation/${id}?token=${encodeURIComponent(token)}`)
+        wsRef.current = ws
+        ws.onopen = () => setWsState('connected')
+        ws.onclose = () => setWsState('disconnected')
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            const entry: LogEntry = {
+              step: data.step,
+              message: data.message,
+              detail: data.detail,
+              timestamp: new Date(),
+            }
+            setLogs(prev => [...prev.slice(-499), entry])
 
-        const idx = stepFromLog(data.step)
-        if (idx >= 0) setActiveStep(idx)
+            const idx = stepFromLog(data.step)
+            if (idx >= 0) setActiveStep(idx)
+          } catch {
+            // ignore parse errors
+          }
+        }
       } catch {
-        // ignore parse errors
+        setWsState('disconnected')
       }
     }
-
+    connect()
     return () => {
-      ws.close()
+      cancelled = true
+      wsRef.current?.close()
       wsRef.current = null
     }
   }, [id])
@@ -136,7 +153,24 @@ export default function GenerationProgress() {
 
   const currentStep = session ? stepIndex(session.status) : activeStep
   const isComplete = session?.status === 'complete'
-  const isError = session?.status === 'error'
+  const isError = session?.status === 'error' || session?.status === 'validation_failed'
+  const isApproved = latestAttempt?.approval_status === 'approved'
+  const isApprovalPending = isComplete && latestAttempt && !isApproved
+
+  async function handleApprove() {
+    if (!id || !latestAttempt || !approvalReason.trim()) return
+    setApproving(true)
+    setError('')
+    try {
+      const approved = await approveGenerationAttempt(id, latestAttempt.id, approvalReason.trim())
+      setLatestAttempt(approved)
+      setApprovalReason('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to approve generated package')
+    } finally {
+      setApproving(false)
+    }
+  }
 
   return (
     <div className="max-w-3xl mx-auto p-8">
@@ -144,14 +178,14 @@ export default function GenerationProgress() {
         &larr; Back to Dashboard
       </Link>
       <h1 className="text-3xl font-bold mt-4 mb-2">
-        {isComplete ? 'Generation Complete' : isError ? 'Generation Failed' : 'Generating CLI...'}
+        {isComplete ? 'Generation Complete' : isError ? 'Generation Needs Review' : 'Generating CLI...'}
       </h1>
       {session && (
         <p className="text-gray-400 mb-8">{session.name} &middot; {session.app_name}</p>
       )}
 
       {error && (
-        <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-6">
+        <div role="alert" className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-6">
           {error}
         </div>
       )}
@@ -214,7 +248,7 @@ export default function GenerationProgress() {
           {!isComplete && !isError && (
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-              <span className="text-xs text-gray-500">Processing</span>
+              <span className="text-xs text-gray-500">{wsState}</span>
             </div>
           )}
         </div>
@@ -254,17 +288,40 @@ export default function GenerationProgress() {
             <div>
               <span className="text-gray-400">Output directory:</span>
               <code className="ml-2 text-gray-200 bg-gray-800 px-2 py-0.5 rounded">
-                ./data/generated/{session?.app_name?.replace(' ', '-').toLowerCase()}/
+                {latestAttempt?.package_path || './data/generated/...'}
               </code>
             </div>
-            <div className="border-t border-green-500/20 pt-3">
+            {isApprovalPending && (
+              <div className="border-t border-green-500/20 pt-3 space-y-3">
+                <p className="text-gray-300">Approval is required before install instructions are shown.</p>
+                <label htmlFor="approval_reason" className="block text-xs text-gray-500">
+                  Approval reason
+                </label>
+                <input
+                  id="approval_reason"
+                  value={approvalReason}
+                  onChange={e => setApprovalReason(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+                <button
+                  onClick={handleApprove}
+                  disabled={approving || !approvalReason.trim()}
+                  className="bg-green-600 px-4 py-2 rounded text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+                >
+                  {approving ? 'Approving...' : 'Approve Generated Package'}
+                </button>
+              </div>
+            )}
+            {isApproved && (
+              <div className="border-t border-green-500/20 pt-3">
               <p className="text-gray-400 mb-2">To install and use:</p>
               <pre className="bg-gray-900 p-3 rounded text-gray-300 text-xs overflow-x-auto">
-{`cd data/generated/${session?.app_name?.replace(' ', '-').toLowerCase()}
+{`cd ${latestAttempt?.package_path || `data/generated/${session?.app_name?.replace(' ', '-').toLowerCase()}`}
 pip install -e .
 ${session?.app_name?.replace(' ', '-').toLowerCase()} --help`}
               </pre>
-            </div>
+              </div>
+            )}
           </div>
         </div>
       )}

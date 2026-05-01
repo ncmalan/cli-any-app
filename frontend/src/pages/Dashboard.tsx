@@ -54,7 +54,7 @@ export default function Dashboard() {
         }
       }).catch(() => {})
     }
-  }, [showSetup])
+  }, [showSetup, interfaces.length, selectedIp])
 
   async function handleDelete(id: string) {
     await deleteSession(id)
@@ -69,6 +69,7 @@ export default function Dashboard() {
         <div className="flex gap-3">
           <button
             onClick={() => setShowSetup(!showSetup)}
+            aria-pressed={showSetup}
             className="px-4 py-2 rounded border border-gray-700 text-gray-300 hover:bg-gray-800 transition-colors"
           >
             {showSetup ? 'Hide' : 'Device'} Setup
@@ -129,6 +130,7 @@ export default function Dashboard() {
           <div className="flex gap-1 mb-4 bg-gray-950 rounded-lg p-1 w-fit">
             <button
               onClick={() => setSetupTab('ios')}
+              aria-pressed={setupTab === 'ios'}
               className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
                 setupTab === 'ios' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'
               }`}
@@ -137,6 +139,7 @@ export default function Dashboard() {
             </button>
             <button
               onClick={() => setSetupTab('android')}
+              aria-pressed={setupTab === 'android'}
               className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
                 setupTab === 'android' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'
               }`}

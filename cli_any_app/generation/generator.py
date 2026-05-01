@@ -1,7 +1,10 @@
 import json
+import re
 from pathlib import Path
+
 from jinja2 import Environment, FileSystemLoader
 import anthropic
+
 from cli_any_app.config import settings
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -69,17 +72,46 @@ Respond with ONLY the markdown content, no fences."""
 
 
 def get_client() -> anthropic.AsyncAnthropic:
-    return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    return anthropic.AsyncAnthropic(
+        api_key=settings.anthropic_api_key,
+        timeout=settings.llm_timeout_seconds,
+        max_retries=settings.llm_max_retries,
+    )
+
+
+def _safe_slug(value: str, fallback: str = "generated-cli") -> str:
+    slug = re.sub(r"[^a-z0-9_-]+", "-", value.strip().lower()).strip("-_")
+    return slug or fallback
+
+
+def _safe_package_name(value: str) -> str:
+    name = re.sub(r"[^a-z0-9_]+", "_", value.strip().lower()).strip("_")
+    if not name or not name[0].isalpha():
+        name = f"cli_{name or 'generated'}"
+    return name[:64]
+
+
+def _safe_output_path(package_dir: Path, filepath: str, package_name: str) -> Path:
+    candidate = Path(filepath)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError(f"Unsafe generated path: {filepath}")
+    if not candidate.parts or candidate.parts[0] != package_name:
+        raise ValueError(f"Generated path must stay inside package module: {filepath}")
+    out_file = (package_dir / candidate).resolve()
+    root = package_dir.resolve()
+    if root not in out_file.parents:
+        raise ValueError(f"Generated path escapes package directory: {filepath}")
+    return out_file
 
 
 async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=None, session_name: str = "") -> Path:
     app_name = api_spec.get("app_name", "generated-cli")
-    cli_name = app_name.replace(" ", "-").lower()
-    package_name = cli_name.replace("-", "_")
+    cli_name = _safe_slug(app_name)
+    package_name = _safe_package_name(cli_name.replace("-", "_"))
 
     # Use session name as subfolder if provided, otherwise timestamp, to avoid overwrites
     if session_name:
-        folder_name = f"{cli_name}_{session_name.replace(' ', '-').lower()}"
+        folder_name = f"{cli_name}_{_safe_slug(session_name, 'session')}"
     else:
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -117,8 +149,9 @@ async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=Non
         await on_progress("generating", "Generating CLI code...")
 
     code_response = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=16384,
+        model=settings.llm_model,
+        max_tokens=settings.llm_max_tokens,
+        temperature=settings.llm_temperature,
         messages=[
             {
                 "role": "user",
@@ -135,10 +168,12 @@ async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=Non
         code_text = code_text.split("\n", 1)[1].rsplit("```", 1)[0]
 
     files = json.loads(code_text)
+    if not isinstance(files, dict):
+        raise ValueError("Generator response must be a JSON object mapping paths to contents")
     for filepath, content in files.items():
-        out_file = package_dir / filepath
+        out_file = _safe_output_path(package_dir, filepath, package_name)
         out_file.parent.mkdir(parents=True, exist_ok=True)
-        out_file.write_text(content)
+        out_file.write_text(str(content))
         if on_progress:
             await on_progress("generating", f"Wrote {filepath}")
 
@@ -147,8 +182,9 @@ async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=Non
         await on_progress("generating", "Generating SKILL.md...")
 
     skill_response = await client.messages.create(
-        model="claude-sonnet-4-6",
+        model=settings.llm_model,
         max_tokens=4096,
+        temperature=settings.llm_temperature,
         messages=[
             {
                 "role": "user",
