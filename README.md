@@ -252,7 +252,7 @@ npm run test
 npm run build
 ```
 
-Tests use in-memory SQLite and mock the Claude API. No external services needed.
+Tests use temporary file-backed SQLite databases and mock the Claude API. No external services needed.
 Frontend tests use Vitest, React Testing Library, MSW, and axe checks for the
 regulated capture/review workflow.
 

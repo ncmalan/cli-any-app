@@ -110,7 +110,6 @@ def _run_isolated_smoke_test(package_dir: Path, errors: list[str], warnings: lis
         env_dir = Path(tmp) / "venv"
         venv.EnvBuilder(with_pip=True).create(env_dir)
         python = env_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-        script = env_dir / ("Scripts" if sys.platform == "win32" else "bin") / script_name
 
         install = subprocess.run(
             [
@@ -132,7 +131,7 @@ def _run_isolated_smoke_test(package_dir: Path, errors: list[str], warnings: lis
             return
 
         help_run = subprocess.run(
-            [str(script), "--help"],
+            [*_console_script_command(env_dir, script_name), "--help"],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -141,3 +140,20 @@ def _run_isolated_smoke_test(package_dir: Path, errors: list[str], warnings: lis
         )
         if help_run.returncode != 0:
             errors.append(f"Smoke --help failed: {help_run.stdout[-1000:]}")
+
+
+def _console_script_command(env_dir: Path, script_name: str) -> list[str]:
+    if sys.platform != "win32":
+        return [str(env_dir / "bin" / script_name)]
+
+    scripts_dir = env_dir / "Scripts"
+    candidates = [
+        scripts_dir / f"{script_name}.exe",
+        scripts_dir / f"{script_name}.cmd",
+        scripts_dir / f"{script_name}.bat",
+        scripts_dir / script_name,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return [str(candidate)]
+    return [str(candidates[0])]

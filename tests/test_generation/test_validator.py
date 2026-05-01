@@ -1,4 +1,6 @@
-from cli_any_app.generation.validator import validate_generated_cli
+import sys
+
+from cli_any_app.generation.validator import _console_script_command, validate_generated_cli
 
 
 def test_valid_package(tmp_path):
@@ -44,3 +46,15 @@ def test_syntax_error(tmp_path):
     result = validate_generated_cli(pkg)
     assert result["valid"] is False
     assert any("Syntax error" in e or "parse error" in e for e in result["errors"])
+
+
+def test_console_script_command_prefers_windows_wrappers(tmp_path, monkeypatch):
+    env_dir = tmp_path / "venv"
+    scripts_dir = env_dir / "Scripts"
+    scripts_dir.mkdir(parents=True)
+    wrapper = scripts_dir / "patient-cli.cmd"
+    wrapper.write_text("")
+
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    assert _console_script_command(env_dir, "patient-cli") == [str(wrapper)]
