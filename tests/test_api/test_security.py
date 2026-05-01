@@ -205,16 +205,18 @@ def test_redact_url_redacts_phi_like_path_segments():
     from cli_any_app.capture.privacy import redact_url
 
     _, redacted_path, redacted_full = redact_url(
-        "https://api.example.test/patients/jane.doe@example.com/MRN-12345"
+        "https://user:password@api.example.test:8443/patients/jane.doe@example.com/MRN-12345"
         "?token=secret&phone=555-123-4567"
     )
 
+    assert "user:password" not in redacted_full
     assert "jane.doe@example.com" not in redacted_path
     assert "jane.doe@example.com" not in redacted_full
     assert "MRN-12345" not in redacted_path
     assert "MRN-12345" not in redacted_full
     assert "secret" not in redacted_full
     assert "555-123-4567" not in redacted_full
+    assert redacted_full.startswith("https://api.example.test:8443/")
 
 
 async def test_capture_enforces_cumulative_session_size_limit(client, monkeypatch):

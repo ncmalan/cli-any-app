@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, Field, field_serializer
 from sqlalchemy import select, func
 
 from cli_any_app.audit import record_audit_event
@@ -66,7 +66,7 @@ class RequestResponse(BaseModel):
 
 
 class RevealRequest(BaseModel):
-    reason: str
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class RawPayloadResponse(BaseModel):
@@ -168,7 +168,8 @@ async def delete_flow(session_id: str, flow_id: str):
 
 @router.post("/requests/{request_id}/reveal", response_model=RawPayloadResponse)
 async def reveal_raw_payload(session_id: str, request_id: str, body: RevealRequest):
-    if not body.reason.strip():
+    reason = body.reason.strip()
+    if not reason:
         raise HTTPException(status_code=400, detail="Reveal reason is required")
     async with get_session() as db:
         result = await db.execute(
@@ -185,7 +186,7 @@ async def reveal_raw_payload(session_id: str, request_id: str, body: RevealReque
             db,
             "payload.revealed",
             session_id=session_id,
-            reason=body.reason,
+            reason=reason,
             metadata={"request_id": request_id},
         )
         await db.commit()

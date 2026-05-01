@@ -110,3 +110,62 @@ async def test_list_flow_requests(client, session_id):
     assert len(data) == 1
     assert data[0]["flow_id"] == flow_id
     assert data[0]["url"] == "https://api.example.com/items"
+
+
+async def test_reveal_reason_is_bounded_and_trimmed(client, session_id):
+    create = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
+    flow_id = create.json()["id"]
+
+    from sqlalchemy import select
+
+    from cli_any_app.capture.privacy import encrypt_payload
+    from cli_any_app.models.audit_event import AuditEvent
+    from cli_any_app.models.database import get_session
+    from cli_any_app.models.encrypted_payload import EncryptedPayload
+    from cli_any_app.models.request import CapturedRequest
+
+    async with get_session() as db:
+        request = CapturedRequest(
+            flow_id=flow_id,
+            method="GET",
+            url="https://api.example.com/items",
+            status_code=200,
+            request_headers="{}",
+            response_headers="{}",
+            content_type="application/json",
+        )
+        db.add(request)
+        await db.flush()
+        db.add(
+            EncryptedPayload(
+                request_id=request.id,
+                request_body_ciphertext=encrypt_payload('{"ok":true}'),
+                response_body_ciphertext=encrypt_payload('{"done":true}'),
+            )
+        )
+        await db.commit()
+        request_id = request.id
+
+    too_large = await client.post(
+        f"/api/sessions/{session_id}/flows/requests/{request_id}/reveal",
+        json={"reason": "x" * 501},
+    )
+    assert too_large.status_code == 422
+
+    blank = await client.post(
+        f"/api/sessions/{session_id}/flows/requests/{request_id}/reveal",
+        json={"reason": "   "},
+    )
+    assert blank.status_code == 400
+
+    revealed = await client.post(
+        f"/api/sessions/{session_id}/flows/requests/{request_id}/reveal",
+        json={"reason": "  clinical review  "},
+    )
+    assert revealed.status_code == 200
+    assert revealed.json()["request_body"] == '{"ok":true}'
+
+    async with get_session() as db:
+        result = await db.execute(select(AuditEvent).where(AuditEvent.event_type == "payload.revealed"))
+        event = result.scalar_one()
+        assert event.reason == "clinical review"

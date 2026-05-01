@@ -10,8 +10,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from cli_any_app.models.database import Base
 
 if TYPE_CHECKING:
-    from cli_any_app.models.request import CapturedRequest
     from cli_any_app.models.session import Session
+
+from cli_any_app.models.request import CapturedRequest
 
 
 class Flow(Base):
@@ -34,5 +35,5 @@ class Flow(Base):
     requests: Mapped[list["CapturedRequest"]] = relationship(
         back_populates="flow",
         cascade="all, delete-orphan",
-        order_by="CapturedRequest.timestamp",
+        order_by=lambda: (CapturedRequest.timestamp, CapturedRequest.id),
     )

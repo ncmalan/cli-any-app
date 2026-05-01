@@ -21,7 +21,7 @@ async def purge_expired_sessions(now: datetime | None = None, *, limit: int | No
     purged: list[str] = []
     async with get_session() as db:
         result = await db.execute(select(Session).order_by(Session.created_at))
-        for session in result.scalars().all():
+        for session in result.scalars():
             retention_days = max(session.retention_days or 0, 0)
             expires_at = _as_utc(session.created_at) + timedelta(days=retention_days)
             if expires_at > now:

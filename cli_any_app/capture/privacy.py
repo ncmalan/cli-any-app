@@ -191,8 +191,14 @@ def redact_url(url: str) -> tuple[str, str, str]:
     redacted_query = urlencode(safe_pairs, doseq=True)
     safe_path = quote(redact_string(unquote(parsed.path or "/")), safe="/:<>")
     redacted_path = urlunsplit(("", "", safe_path, redacted_query, ""))
-    redacted_full = urlunsplit((parsed.scheme, parsed.netloc, safe_path, redacted_query, ""))
-    return parsed.netloc, redacted_path, redacted_full
+    safe_host = parsed.hostname or ""
+    safe_netloc = safe_host
+    if ":" in safe_host and not safe_host.startswith("["):
+        safe_netloc = f"[{safe_host}]"
+    if parsed.port is not None:
+        safe_netloc = f"{safe_netloc}:{parsed.port}"
+    redacted_full = urlunsplit((parsed.scheme, safe_netloc, safe_path, redacted_query, ""))
+    return safe_netloc, redacted_path, redacted_full
 
 
 def redact_value(value: Any) -> Any:
