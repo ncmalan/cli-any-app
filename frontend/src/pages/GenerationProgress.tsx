@@ -156,6 +156,8 @@ export default function GenerationProgress() {
   const isError = session?.status === 'error' || session?.status === 'validation_failed'
   const isApproved = latestAttempt?.approval_status === 'approved'
   const isApprovalPending = isComplete && latestAttempt && !isApproved
+  const installPackagePath = latestAttempt?.package_path || 'data/generated/...'
+  const installCliName = latestAttempt?.cli_name || 'generated-cli'
 
   async function handleApprove() {
     if (!id || !latestAttempt || !approvalReason.trim()) return
@@ -316,9 +318,9 @@ export default function GenerationProgress() {
               <div className="border-t border-green-500/20 pt-3">
               <p className="text-gray-400 mb-2">To install and use:</p>
               <pre className="bg-gray-900 p-3 rounded text-gray-300 text-xs overflow-x-auto">
-{`cd ${latestAttempt?.package_path || `data/generated/${session?.app_name?.replace(' ', '-').toLowerCase()}`}
+{`cd ${installPackagePath}
 pip install -e .
-${session?.app_name?.replace(' ', '-').toLowerCase()} --help`}
+${installCliName} --help`}
               </pre>
               </div>
             )}

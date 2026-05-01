@@ -103,6 +103,7 @@ export interface GenerationAttempt {
   status: string
   approval_status: string
   package_path: string
+  cli_name: string
   validation: { valid?: boolean; errors?: string[]; warnings?: string[] }
   created_at: string
   completed_at: string | null

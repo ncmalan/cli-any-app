@@ -227,7 +227,7 @@ async def test_capture_enforces_cumulative_session_size_limit(client, monkeypatc
     from cli_any_app.models.session import Session
     from cli_any_app.security import token_hash
 
-    settings.max_session_capture_bytes = 200
+    settings.max_session_capture_bytes = 6
     session = Session(
         name="Capture",
         app_name="app",

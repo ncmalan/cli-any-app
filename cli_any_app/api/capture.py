@@ -2,7 +2,7 @@ import json
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import LargeBinary, cast, func, select
 
 from cli_any_app.capture.filters import is_api_request, extract_domain
 from cli_any_app.capture.privacy import (
@@ -46,12 +46,6 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
     response_header_bytes = headers_size(payload.response_headers)
     request_body_size = body_size(payload.request_body)
     response_body_size = body_size(payload.response_body)
-    incoming_capture_bytes = (
-        request_header_bytes
-        + response_header_bytes
-        + request_body_size
-        + response_body_size
-    )
 
     if request_header_bytes > settings.max_header_bytes:
         raise HTTPException(status_code=413, detail="Request headers exceed capture limit")
@@ -79,6 +73,14 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
         redaction_status = "redacted"
     elif binary_body:
         redaction_status = "skipped_binary"
+    stored_request_headers = json.dumps(request_headers, sort_keys=True)
+    stored_response_headers = json.dumps(response_headers, sort_keys=True)
+    incoming_capture_bytes = (
+        body_size(stored_request_headers)
+        + body_size(stored_response_headers)
+        + body_size(request_body)
+        + body_size(response_body)
+    )
 
     async with get_session() as db:
         session = await db.get(Session, payload.session_id)
@@ -112,12 +114,12 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
             url=redacted_url,
             host=host,
             redacted_path=redacted_path,
-            request_headers=json.dumps(request_headers, sort_keys=True),
+            request_headers=stored_request_headers,
             request_body=request_body,
             request_body_size=request_body_size,
             request_body_hash=request_body_hash,
             status_code=payload.status_code,
-            response_headers=json.dumps(response_headers, sort_keys=True),
+            response_headers=stored_response_headers,
             response_body=response_body,
             response_body_size=response_body_size,
             response_body_hash=response_body_hash,
@@ -152,11 +154,14 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
 
 
 async def _session_capture_bytes(db, session_id: str) -> int:
+    def stored_text_bytes(column):
+        return func.coalesce(func.length(cast(column, LargeBinary)), 0)
+
     request_bytes = (
-        CapturedRequest.request_body_size
-        + CapturedRequest.response_body_size
-        + func.coalesce(func.length(CapturedRequest.request_headers), 0)
-        + func.coalesce(func.length(CapturedRequest.response_headers), 0)
+        stored_text_bytes(CapturedRequest.request_body)
+        + stored_text_bytes(CapturedRequest.response_body)
+        + stored_text_bytes(CapturedRequest.request_headers)
+        + stored_text_bytes(CapturedRequest.response_headers)
     )
     result = await db.execute(
         select(func.coalesce(func.sum(request_bytes), 0))

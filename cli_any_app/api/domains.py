@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from cli_any_app.audit import record_audit_event
@@ -23,7 +23,7 @@ class DomainInfo(BaseModel):
 
 class DomainToggle(BaseModel):
     enabled: bool
-    reason: str | None = None
+    reason: str | None = Field(default=None, max_length=500)
 
 
 _domain_filters: dict[str, dict[str, bool]] = {}
@@ -73,6 +73,10 @@ async def list_domains(session_id: str):
 
 @router.put("/{domain}", response_model=DomainInfo)
 async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
+    reason = body.reason.strip() if body.reason is not None else None
+    if body.reason is not None and not reason:
+        raise HTTPException(status_code=400, detail="Domain filter reason cannot be blank")
+
     async with get_session() as db:
         session = await db.get(Session, session_id)
         if not session or session.status == "deleted":
@@ -86,14 +90,14 @@ async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
         existing = result.scalar_one_or_none()
         if existing:
             existing.enabled = body.enabled
-            existing.reason = body.reason
+            existing.reason = reason
             existing.source = "user"
         else:
             existing = DomainFilter(
                 session_id=session_id,
                 domain=domain,
                 enabled=body.enabled,
-                reason=body.reason,
+                reason=reason,
                 source="user",
             )
             db.add(existing)
@@ -102,7 +106,7 @@ async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
             db,
             "domain_filter.changed",
             session_id=session_id,
-            reason=body.reason,
+            reason=reason,
             metadata={"domain": domain, "enabled": body.enabled, "source": "user"},
         )
         await db.commit()

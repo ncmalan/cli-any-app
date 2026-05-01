@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
+import tomllib
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
@@ -33,6 +34,13 @@ class GenerationApprovalRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
+def _clean_reason(reason: str) -> str:
+    cleaned = reason.strip()
+    if not cleaned:
+        raise HTTPException(400, "Reason is required")
+    return cleaned
+
+
 def _attempt_payload(attempt: GenerationAttempt | None) -> dict | None:
     if attempt is None:
         return None
@@ -41,6 +49,7 @@ def _attempt_payload(attempt: GenerationAttempt | None) -> dict | None:
         "status": attempt.status,
         "approval_status": attempt.approval_status,
         "package_path": attempt.package_path,
+        "cli_name": _load_cli_name(attempt.package_path),
         "validation": json.loads(attempt.validation_report_json or "{}"),
         "created_at": attempt.created_at.isoformat(),
         "completed_at": attempt.completed_at.isoformat() if attempt.completed_at else None,
@@ -219,6 +228,21 @@ def _load_skill_md(package_path: str) -> str:
         return ""
 
 
+def _load_cli_name(package_path: str) -> str:
+    if not package_path:
+        return ""
+
+    pyproject_path = Path(package_path) / "pyproject.toml"
+    try:
+        data = tomllib.loads(pyproject_path.read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    scripts = data.get("project", {}).get("scripts", {})
+    if not isinstance(scripts, dict) or not scripts:
+        return ""
+    return str(next(iter(scripts)))
+
+
 def _hash_generated_files(package_path: str) -> dict[str, str]:
     if not package_path:
         return {}
@@ -272,6 +296,7 @@ async def approve_generation_attempt(
     attempt_id: str,
     body: GenerationApprovalRequest,
 ):
+    reason = _clean_reason(body.reason)
     async with get_session() as db:
         session = await db.get(Session, session_id)
         attempt = await db.get(GenerationAttempt, attempt_id)
@@ -285,7 +310,7 @@ async def approve_generation_attempt(
             db,
             "generation.approved",
             session_id=session_id,
-            reason=body.reason,
+            reason=reason,
             metadata={"attempt_id": attempt_id, "package_path": attempt.package_path},
         )
         await db.commit()
@@ -298,6 +323,7 @@ async def reject_generation_attempt(
     attempt_id: str,
     body: GenerationApprovalRequest,
 ):
+    reason = _clean_reason(body.reason)
     async with get_session() as db:
         session = await db.get(Session, session_id)
         attempt = await db.get(GenerationAttempt, attempt_id)
@@ -308,7 +334,7 @@ async def reject_generation_attempt(
             db,
             "generation.rejected",
             session_id=session_id,
-            reason=body.reason,
+            reason=reason,
             metadata={"attempt_id": attempt_id},
         )
         await db.commit()

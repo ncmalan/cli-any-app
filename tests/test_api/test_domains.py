@@ -1,5 +1,6 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 
 @pytest.fixture(autouse=True)
@@ -112,3 +113,38 @@ async def test_toggle_domain_disable(client):
     resp = await client.get(f"/api/sessions/{session_id}/domains")
     example = [d for d in resp.json() if d["domain"] == "api.example.com"][0]
     assert example["enabled"] is False
+
+
+async def test_toggle_domain_bounds_and_trims_reason(client):
+    from cli_any_app.models.audit_event import AuditEvent
+    from cli_any_app.models.database import get_session
+    from cli_any_app.models.domain_filter import DomainFilter
+
+    session_id = await _create_session_with_requests(client)
+
+    resp = await client.put(
+        f"/api/sessions/{session_id}/domains/api.example.com",
+        json={"enabled": False, "reason": "  reviewer disabled domain  "},
+    )
+    assert resp.status_code == 200
+
+    async with get_session() as db:
+        filters = await db.execute(select(DomainFilter).where(DomainFilter.session_id == session_id))
+        domain_filter = filters.scalar_one()
+        assert domain_filter.reason == "reviewer disabled domain"
+        events = await db.execute(select(AuditEvent).where(AuditEvent.event_type == "domain_filter.changed"))
+        audit_event = events.scalar_one()
+        assert audit_event.reason == "reviewer disabled domain"
+
+    blank = await client.put(
+        f"/api/sessions/{session_id}/domains/api.example.com",
+        json={"enabled": True, "reason": "   "},
+    )
+    assert blank.status_code == 400
+    assert blank.json()["detail"] == "Domain filter reason cannot be blank"
+
+    too_long = await client.put(
+        f"/api/sessions/{session_id}/domains/api.example.com",
+        json={"enabled": True, "reason": "x" * 501},
+    )
+    assert too_long.status_code == 422
