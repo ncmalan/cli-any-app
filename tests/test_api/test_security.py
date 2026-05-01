@@ -288,3 +288,59 @@ async def test_capture_enforces_cumulative_session_size_limit(client, monkeypatc
     )
     assert oversized.status_code == 413
     assert oversized.json()["detail"] == "Session capture size limit exceeded"
+
+
+async def test_capture_session_size_limit_counts_encrypted_raw_payloads(client, monkeypatch):
+    from cli_any_app.capture.proxy_manager import proxy_manager
+    from cli_any_app.config import settings
+    from cli_any_app.models.database import get_session
+    from cli_any_app.models.flow import Flow
+    from cli_any_app.models.session import Session
+    from cli_any_app.security import token_hash
+
+    settings.raw_body_capture_enabled = True
+    settings.max_session_capture_bytes = 150
+    monkeypatch.setattr(
+        "cli_any_app.api.capture.encrypt_payload",
+        lambda value: ("c" * 50) if value is not None else None,
+    )
+    session = Session(
+        name="Capture",
+        app_name="app",
+        status="recording",
+        capture_token_hash=token_hash("good-token"),
+    )
+    async with get_session() as db:
+        db.add(session)
+        await db.flush()
+        db.add(Flow(session_id=session.id, label="login", order=1))
+        await db.commit()
+        session_id = session.id
+
+    monkeypatch.setattr(proxy_manager, "owns_session", lambda sid: sid == session_id)
+    payload = {
+        "session_id": session_id,
+        "method": "POST",
+        "url": "https://api.example.com/patients",
+        "request_headers": {},
+        "request_body": "x",
+        "status_code": 200,
+        "response_headers": {},
+        "response_body": "y",
+        "content_type": "text/plain",
+    }
+
+    ok = await client.post(
+        "/api/internal/capture",
+        json=payload,
+        headers={"X-Capture-Token": "good-token"},
+    )
+    assert ok.status_code == 202
+
+    oversized = await client.post(
+        "/api/internal/capture",
+        json=payload,
+        headers={"X-Capture-Token": "good-token"},
+    )
+    assert oversized.status_code == 413
+    assert oversized.json()["detail"] == "Session capture size limit exceeded"

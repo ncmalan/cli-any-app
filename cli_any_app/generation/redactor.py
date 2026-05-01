@@ -75,7 +75,20 @@ def redact_string(value: str) -> str:
 def redact_url(url: str) -> str:
     parsed = urlsplit(url)
     query = redact_query(parsed.query)
-    return urlunsplit((parsed.scheme, parsed.netloc, redact_string(parsed.path), query, ""))
+    return urlunsplit((parsed.scheme, _safe_netloc(parsed), redact_string(parsed.path), query, ""))
+
+
+def _safe_netloc(parsed) -> str:
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if port is not None:
+        return f"{host}:{port}"
+    return host
 
 
 def redact_query(query: str) -> str:

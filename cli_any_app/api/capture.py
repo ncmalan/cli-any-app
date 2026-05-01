@@ -65,11 +65,15 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
     binary_body = is_binary_content(payload.content_type)
     request_body = None
     response_body = None
+    encrypted_request_body = None
+    encrypted_response_body = None
     redaction_status = "metadata_only"
 
     if settings.raw_body_capture_enabled and not binary_body:
         request_body = redact_body_text(payload.request_body, payload.content_type)
         response_body = redact_body_text(payload.response_body, payload.content_type)
+        encrypted_request_body = encrypt_payload(payload.request_body)
+        encrypted_response_body = encrypt_payload(payload.response_body)
         redaction_status = "redacted"
     elif binary_body:
         redaction_status = "skipped_binary"
@@ -80,6 +84,8 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
         + body_size(stored_response_headers)
         + body_size(request_body)
         + body_size(response_body)
+        + body_size(encrypted_request_body)
+        + body_size(encrypted_response_body)
     )
 
     async with get_session() as db:
@@ -133,8 +139,8 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
             db.add(
                 EncryptedPayload(
                     request_id=req.id,
-                    request_body_ciphertext=encrypt_payload(payload.request_body),
-                    response_body_ciphertext=encrypt_payload(payload.response_body),
+                    request_body_ciphertext=encrypted_request_body,
+                    response_body_ciphertext=encrypted_response_body,
                 )
             )
         await db.commit()
@@ -162,11 +168,14 @@ async def _session_capture_bytes(db, session_id: str) -> int:
         + stored_text_bytes(CapturedRequest.response_body)
         + stored_text_bytes(CapturedRequest.request_headers)
         + stored_text_bytes(CapturedRequest.response_headers)
+        + stored_text_bytes(EncryptedPayload.request_body_ciphertext)
+        + stored_text_bytes(EncryptedPayload.response_body_ciphertext)
     )
     result = await db.execute(
         select(func.coalesce(func.sum(request_bytes), 0))
         .select_from(CapturedRequest)
         .join(Flow, CapturedRequest.flow_id == Flow.id)
+        .outerjoin(EncryptedPayload, EncryptedPayload.request_id == CapturedRequest.id)
         .where(Flow.session_id == session_id)
     )
     return int(result.scalar_one() or 0)
