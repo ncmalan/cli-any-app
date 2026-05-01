@@ -114,6 +114,26 @@ def test_session_cookie_secure_attribute_is_configurable():
     assert all("Secure" in header for header in delete_cookie_headers)
 
 
+def test_unsign_payload_rejects_malformed_expiry_values():
+    import hashlib
+    import hmac
+    import json
+
+    from cli_any_app.security import SESSION_PURPOSE, _b64e, get_app_secret, unsign_payload
+
+    def signed(payload):
+        raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+        encoded = _b64e(raw)
+        sig = hmac.new(get_app_secret(), encoded.encode(), hashlib.sha256).digest()
+        return f"{encoded}.{_b64e(sig)}"
+
+    null_exp = signed({"purpose": SESSION_PURPOSE, "exp": None})
+    non_numeric_exp = signed({"purpose": SESSION_PURPOSE, "exp": "not-a-number"})
+
+    assert unsign_payload(null_exp, SESSION_PURPOSE) is None
+    assert unsign_payload(non_numeric_exp, SESSION_PURPOSE) is None
+
+
 async def test_capture_requires_valid_recording_token(client, monkeypatch):
     from cli_any_app.capture.proxy_manager import proxy_manager
     from cli_any_app.models.database import get_session

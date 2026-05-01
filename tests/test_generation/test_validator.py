@@ -110,9 +110,13 @@ test-cli = "test_app.cli:cli"
     (pkg_dir / "cli.py").write_text("import click\n\n@click.group()\ndef cli(): pass\n")
     (pkg_dir / "__init__.py").write_text("")
 
+    builders = []
+
     class FakeEnvBuilder:
-        def __init__(self, *, with_pip: bool):
+        def __init__(self, *, with_pip: bool, system_site_packages: bool = False):
             self.with_pip = with_pip
+            self.system_site_packages = system_site_packages
+            builders.append(self)
 
         def create(self, env_dir):
             bin_dir = env_dir / ("Scripts" if sys.platform == "win32" else "bin")
@@ -132,6 +136,8 @@ test-cli = "test_app.cli:cli"
     result = validate_generated_cli(pkg, run_smoke=True)
 
     assert result["valid"] is True
+    assert builders[0].with_pip is True
+    assert builders[0].system_site_packages is True
     install_args = calls[0]
     assert "--no-build-isolation" in install_args
     assert "--no-deps" in install_args

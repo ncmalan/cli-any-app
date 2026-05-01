@@ -132,6 +132,7 @@ async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=Non
         "command_groups": api_spec.get("command_groups", []),
     }
 
+    protected_paths: set[Path] = set()
     for template_name, output_path in [
         ("pyproject.toml.j2", "pyproject.toml"),
         ("config.py.j2", f"{package_name}/config.py"),
@@ -141,6 +142,7 @@ async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=Non
         out_file = package_dir / output_path
         out_file.parent.mkdir(parents=True, exist_ok=True)
         out_file.write_text(content)
+        protected_paths.add(out_file.resolve())
 
     # Step 2: Generate CLI code via Claude
     client = get_client()
@@ -172,6 +174,10 @@ async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=Non
         raise ValueError("Generator response must be a JSON object mapping paths to contents")
     for filepath, content in files.items():
         out_file = _safe_output_path(package_dir, filepath, package_name)
+        if out_file.resolve() in protected_paths:
+            raise ValueError(f"Generated output may not overwrite trusted template file: {filepath}")
+        if out_file.exists():
+            raise ValueError(f"Generated output may not overwrite existing file: {filepath}")
         out_file.parent.mkdir(parents=True, exist_ok=True)
         out_file.write_text(str(content))
         if on_progress:

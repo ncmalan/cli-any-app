@@ -132,7 +132,9 @@ def _run_isolated_smoke_test(package_dir: Path, errors: list[str], warnings: lis
 
     with tempfile.TemporaryDirectory(prefix="cli-any-app-validate-") as tmp:
         env_dir = Path(tmp) / "venv"
-        venv.EnvBuilder(with_pip=True).create(env_dir)
+        # Dependencies are allowlisted before this point; expose the host environment so
+        # --no-deps/--no-index smoke tests can import them without network access.
+        venv.EnvBuilder(with_pip=True, system_site_packages=True).create(env_dir)
         python = env_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
 
         install = subprocess.run(

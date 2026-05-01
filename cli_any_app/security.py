@@ -124,7 +124,11 @@ def unsign_payload(token: str, purpose: str) -> dict[str, Any] | None:
         return None
     if payload.get("purpose") != purpose:
         return None
-    if int(payload.get("exp", 0)) < int(time.time()):
+    try:
+        expires_at = int(payload.get("exp", 0))
+    except (TypeError, ValueError):
+        return None
+    if expires_at < int(time.time()):
         return None
     return payload
 
