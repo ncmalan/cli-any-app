@@ -1,3 +1,4 @@
+import ipaddress
 from urllib.parse import urlparse
 
 API_CONTENT_TYPES = {
@@ -24,5 +25,24 @@ def is_api_request(content_type: str, url: str) -> bool:
     return True
 
 
+def normalize_domain(value: str) -> str:
+    domain = (value or "").strip().lower()
+    if not domain:
+        return ""
+
+    bracketless = domain[1:-1] if domain.startswith("[") and domain.endswith("]") else domain
+    try:
+        return str(ipaddress.ip_address(bracketless))
+    except ValueError:
+        pass
+
+    parsed = urlparse(domain if "://" in domain else f"//{domain}")
+    try:
+        hostname = parsed.hostname
+    except ValueError:
+        return domain
+    return (hostname or domain).lower()
+
+
 def extract_domain(url: str) -> str:
-    return urlparse(url).hostname or ""
+    return normalize_domain(urlparse(url).hostname or "")

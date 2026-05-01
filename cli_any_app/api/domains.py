@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from cli_any_app.audit import record_audit_event
-from cli_any_app.capture.filters import extract_domain
+from cli_any_app.capture.filters import extract_domain, normalize_domain
 from cli_any_app.capture.noise_domains import matches_noise_pattern
 from cli_any_app.models.database import get_session
 from cli_any_app.models.domain_filter import DomainFilter
@@ -32,16 +32,18 @@ _domain_filters: dict[str, dict[str, bool]] = {}
 def is_domain_enabled(session_id: str, domain: str) -> bool:
     """Compatibility fallback for legacy tests; generation uses persisted filters."""
     filters = _domain_filters.get(session_id, {})
-    return filters.get(domain, not matches_noise_pattern(domain))
+    normalized = normalize_domain(domain)
+    return filters.get(normalized, filters.get(domain, not matches_noise_pattern(normalized)))
 
 
 async def load_domain_enabled_map(db, session_id: str) -> dict[str, bool]:
     result = await db.execute(select(DomainFilter).where(DomainFilter.session_id == session_id))
-    return {row.domain: row.enabled for row in result.scalars().all()}
+    return {normalize_domain(row.domain): row.enabled for row in result.scalars().all()}
 
 
 def domain_enabled_from_map(filters: dict[str, bool], domain: str) -> bool:
-    return filters.get(domain, not matches_noise_pattern(domain))
+    normalized = normalize_domain(domain)
+    return filters.get(normalized, filters.get(domain, not matches_noise_pattern(normalized)))
 
 
 @router.get("", response_model=list[DomainInfo])
@@ -60,8 +62,9 @@ async def list_domains(session_id: str):
 
     domain_counts: dict[str, int] = {}
     for url, host in rows:
-        d = host or extract_domain(url)
-        domain_counts[d] = domain_counts.get(d, 0) + 1
+        d = normalize_domain(host or extract_domain(url))
+        if d:
+            domain_counts[d] = domain_counts.get(d, 0) + 1
 
     domains = []
     for domain, count in sorted(domain_counts.items(), key=lambda x: -x[1]):
@@ -73,6 +76,7 @@ async def list_domains(session_id: str):
 
 @router.put("/{domain}", response_model=DomainInfo)
 async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
+    domain = normalize_domain(domain)
     reason = body.reason.strip() if body.reason is not None else None
     if body.reason is not None and not reason:
         raise HTTPException(status_code=400, detail="Domain filter reason cannot be blank")

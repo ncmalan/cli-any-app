@@ -115,6 +115,62 @@ async def test_toggle_domain_disable(client):
     assert example["enabled"] is False
 
 
+async def test_domain_listing_normalizes_host_before_noise_detection(client):
+    from cli_any_app.models.database import get_session
+    from cli_any_app.models.flow import Flow
+    from cli_any_app.models.request import CapturedRequest
+    from cli_any_app.models.session import Session
+
+    session = Session(name="Ports", app_name="app")
+    async with get_session() as db:
+        db.add(session)
+        await db.flush()
+        flow = Flow(session_id=session.id, label="Flow", order=1)
+        db.add(flow)
+        await db.flush()
+        db.add_all(
+            [
+                CapturedRequest(
+                    flow_id=flow.id,
+                    method="GET",
+                    url="https://firebaselogging.googleapis.com:443/log",
+                    host="firebaselogging.googleapis.com:443",
+                    status_code=200,
+                ),
+                CapturedRequest(
+                    flow_id=flow.id,
+                    method="GET",
+                    url="https://analytics.google-analytics.com:8443/collect",
+                    host="analytics.google-analytics.com:8443",
+                    status_code=200,
+                ),
+            ]
+        )
+        await db.commit()
+        session_id = session.id
+
+    resp = await client.get(f"/api/sessions/{session_id}/domains")
+    assert resp.status_code == 200
+    domains = {item["domain"]: item for item in resp.json()}
+    assert set(domains) == {
+        "firebaselogging.googleapis.com",
+        "analytics.google-analytics.com",
+    }
+    assert all(item["is_noise"] is True for item in domains.values())
+    assert all(item["enabled"] is False for item in domains.values())
+
+    toggle = await client.put(
+        f"/api/sessions/{session_id}/domains/firebaselogging.googleapis.com:443",
+        json={"enabled": True},
+    )
+    assert toggle.status_code == 200
+    assert toggle.json()["domain"] == "firebaselogging.googleapis.com"
+
+    resp = await client.get(f"/api/sessions/{session_id}/domains")
+    domains = {item["domain"]: item for item in resp.json()}
+    assert domains["firebaselogging.googleapis.com"]["enabled"] is True
+
+
 async def test_toggle_domain_bounds_and_trims_reason(client):
     from cli_any_app.models.audit_event import AuditEvent
     from cli_any_app.models.database import get_session
