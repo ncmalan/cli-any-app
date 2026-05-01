@@ -10,6 +10,7 @@ import stat
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request, Response, WebSocket
 
@@ -198,8 +199,40 @@ def validate_ws_origin(ws: WebSocket) -> bool:
     origin = ws.headers.get("origin")
     if not origin:
         return False
-    allowed_hosts = {ws.headers.get("host", ""), f"127.0.0.1:{settings.port}", f"localhost:{settings.port}"}
-    return any(origin.endswith(host) for host in allowed_hosts if host)
+    try:
+        parsed = urlsplit(origin)
+        origin_port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    if origin_port is None:
+        origin_port = 443 if parsed.scheme == "https" else 80
+
+    origin_host = parsed.hostname.lower()
+    allowed = _allowed_ws_origins()
+    return (origin_host, origin_port) in allowed
+
+
+def _allowed_ws_origins() -> set[tuple[str, int]]:
+    hosts = {"127.0.0.1", "localhost", "::1"}
+    configured_host = settings.host.strip().lower().strip("[]")
+    if configured_host and configured_host not in {"0.0.0.0", "::", "*"}:
+        hosts.add(configured_host)
+
+    allowed = {(host, settings.port) for host in hosts}
+    for configured_origin in settings.ws_allowed_origins:
+        try:
+            parsed = urlsplit(configured_origin)
+            port = parsed.port
+        except ValueError:
+            continue
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            continue
+        if port is None:
+            port = 443 if parsed.scheme == "https" else 80
+        allowed.add((parsed.hostname.lower(), port))
+    return allowed
 
 
 def token_hash(token: str) -> str:

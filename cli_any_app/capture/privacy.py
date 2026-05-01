@@ -8,7 +8,7 @@ import re
 import stat
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
 from cryptography.fernet import Fernet
 
@@ -98,7 +98,7 @@ PHI_PATTERNS = [
     (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "<SSN>"),
     (re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"), "<PHONE>"),
     (re.compile(r"\b(?:19|20)\d{2}[-/](?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])\b"), "<DATE>"),
-    (re.compile(r"\b(?:MRN|patient[_\s-]?id)[:=]?\s*[A-Z0-9-]{4,}\b", re.I), "<PATIENT_ID>"),
+    (re.compile(r"\b(?:MRN|patient[_\s-]?id)[-:=]?\s*[A-Z0-9-]{4,}\b", re.I), "<PATIENT_ID>"),
 ]
 
 
@@ -189,8 +189,9 @@ def redact_url(url: str) -> tuple[str, str, str]:
         else:
             safe_pairs.append((key, redact_string(value)))
     redacted_query = urlencode(safe_pairs, doseq=True)
-    redacted_path = urlunsplit(("", "", parsed.path or "/", redacted_query, ""))
-    redacted_full = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, redacted_query, ""))
+    safe_path = quote(redact_string(unquote(parsed.path or "/")), safe="/:<>")
+    redacted_path = urlunsplit(("", "", safe_path, redacted_query, ""))
+    redacted_full = urlunsplit((parsed.scheme, parsed.netloc, safe_path, redacted_query, ""))
     return parsed.netloc, redacted_path, redacted_full
 
 

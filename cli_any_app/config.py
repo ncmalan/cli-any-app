@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     csrf_cookie_name: str = "cli_any_app_csrf"
     session_ttl_seconds: int = 60 * 60 * 12
     ws_token_ttl_seconds: int = 60
+    ws_allowed_origins: list[str] = []
     test_auto_auth: bool = False
     raw_body_capture_enabled: bool = False
     max_header_bytes: int = 32_768

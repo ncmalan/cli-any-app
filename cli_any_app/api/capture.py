@@ -2,7 +2,7 @@ import json
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from cli_any_app.capture.filters import is_api_request, extract_domain
 from cli_any_app.capture.privacy import (
@@ -42,21 +42,30 @@ class CapturePayload(BaseModel):
 async def receive_capture(payload: CapturePayload, x_capture_token: str | None = Header(None)):
     domain = extract_domain(payload.url)
 
-    if headers_size(payload.request_headers) > settings.max_header_bytes:
+    request_header_bytes = headers_size(payload.request_headers)
+    response_header_bytes = headers_size(payload.response_headers)
+    request_body_size = body_size(payload.request_body)
+    response_body_size = body_size(payload.response_body)
+    incoming_capture_bytes = (
+        request_header_bytes
+        + response_header_bytes
+        + request_body_size
+        + response_body_size
+    )
+
+    if request_header_bytes > settings.max_header_bytes:
         raise HTTPException(status_code=413, detail="Request headers exceed capture limit")
-    if headers_size(payload.response_headers) > settings.max_header_bytes:
+    if response_header_bytes > settings.max_header_bytes:
         raise HTTPException(status_code=413, detail="Response headers exceed capture limit")
-    if body_size(payload.request_body) > settings.max_body_bytes:
+    if request_body_size > settings.max_body_bytes:
         raise HTTPException(status_code=413, detail="Request body exceeds capture limit")
-    if body_size(payload.response_body) > settings.max_body_bytes:
+    if response_body_size > settings.max_body_bytes:
         raise HTTPException(status_code=413, detail="Response body exceeds capture limit")
 
     api_flag = is_api_request(payload.content_type, payload.url)
     host, redacted_path, redacted_url = redact_url(payload.url)
     request_headers = redact_headers(payload.request_headers)
     response_headers = redact_headers(payload.response_headers)
-    request_body_size = body_size(payload.request_body)
-    response_body_size = body_size(payload.response_body)
     request_body_hash = body_hash(payload.request_body)
     response_body_hash = body_hash(payload.response_body)
     binary_body = is_binary_content(payload.content_type)
@@ -84,6 +93,10 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
 
             if not proxy_manager.owns_session(payload.session_id):
                 raise HTTPException(status_code=403, detail="Active proxy does not own session")
+        if settings.max_session_capture_bytes > 0:
+            existing_bytes = await _session_capture_bytes(db, payload.session_id)
+            if existing_bytes + incoming_capture_bytes > settings.max_session_capture_bytes:
+                raise HTTPException(status_code=413, detail="Session capture size limit exceeded")
         result = await db.execute(
             select(Flow)
             .where(Flow.session_id == payload.session_id, Flow.ended_at.is_(None))
@@ -136,3 +149,19 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
         "flow_label": flow.label,
     })
     return {"status": "captured", "is_api": api_flag, "domain": domain}
+
+
+async def _session_capture_bytes(db, session_id: str) -> int:
+    request_bytes = (
+        CapturedRequest.request_body_size
+        + CapturedRequest.response_body_size
+        + func.coalesce(func.length(CapturedRequest.request_headers), 0)
+        + func.coalesce(func.length(CapturedRequest.response_headers), 0)
+    )
+    result = await db.execute(
+        select(func.coalesce(func.sum(request_bytes), 0))
+        .select_from(CapturedRequest)
+        .join(Flow, CapturedRequest.flow_id == Flow.id)
+        .where(Flow.session_id == session_id)
+    )
+    return int(result.scalar_one() or 0)
