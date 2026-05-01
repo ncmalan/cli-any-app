@@ -89,6 +89,7 @@ async def test_toggle_domain(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["domain"] == "tracking.facebook.com"
+    assert data["request_count"] == 1
     assert data["enabled"] is True
     assert data["is_noise"] is True
 
@@ -165,6 +166,7 @@ async def test_domain_listing_normalizes_host_before_noise_detection(client):
     )
     assert toggle.status_code == 200
     assert toggle.json()["domain"] == "firebaselogging.googleapis.com"
+    assert toggle.json()["request_count"] == 1
 
     resp = await client.get(f"/api/sessions/{session_id}/domains")
     domains = {item["domain"]: item for item in resp.json()}

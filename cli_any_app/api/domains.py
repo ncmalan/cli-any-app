@@ -46,6 +46,14 @@ def domain_enabled_from_map(filters: dict[str, bool], domain: str) -> bool:
     return filters.get(normalized, filters.get(domain, not matches_noise_pattern(normalized)))
 
 
+def _count_matching_domain(rows, domain: str) -> int:
+    return sum(
+        1
+        for url, host in rows
+        if normalize_domain(host or extract_domain(url)) == domain
+    )
+
+
 @router.get("", response_model=list[DomainInfo])
 async def list_domains(session_id: str):
     async with get_session() as db:
@@ -85,6 +93,12 @@ async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
         session = await db.get(Session, session_id)
         if not session or session.status == "deleted":
             raise HTTPException(status_code=404, detail="Session not found")
+        count_result = await db.execute(
+            select(CapturedRequest.url, CapturedRequest.host)
+            .join(Flow)
+            .where(Flow.session_id == session_id)
+        )
+        request_count = _count_matching_domain(count_result.all(), domain)
         result = await db.execute(
             select(DomainFilter).where(
                 DomainFilter.session_id == session_id,
@@ -116,7 +130,7 @@ async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
         await db.commit()
     return DomainInfo(
         domain=domain,
-        request_count=0,
+        request_count=request_count,
         is_noise=matches_noise_pattern(domain),
         enabled=body.enabled,
     )

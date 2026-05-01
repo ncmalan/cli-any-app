@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'jest-axe'
 import { HttpResponse, http } from 'msw'
@@ -80,5 +80,41 @@ describe('SessionReview safety defaults', () => {
 
     const results = await axe(container)
     expect(results.violations).toHaveLength(0)
+  })
+
+  it('preserves selected request count when toggling a domain', async () => {
+    server.use(
+      http.get('/api/sessions/s1', () => HttpResponse.json(stoppedSession)),
+      http.get('/api/sessions/s1/flows', () => HttpResponse.json([
+        {
+          id: 'f1',
+          session_id: 's1',
+          label: 'Patient lookup',
+          order: 1,
+          started_at: '2026-05-01T00:00:00Z',
+          ended_at: '2026-05-01T00:01:00Z',
+        },
+      ])),
+      http.get('/api/sessions/s1/domains', () => HttpResponse.json([
+        { domain: 'api.example.test', request_count: 3, is_noise: false, enabled: true },
+      ])),
+      http.get('/api/settings', () => HttpResponse.json({ has_key: true })),
+      http.put('/api/sessions/s1/domains/api.example.test', () => HttpResponse.json({
+        domain: 'api.example.test',
+        request_count: 0,
+        is_noise: false,
+        enabled: false,
+      })),
+    )
+
+    renderReview()
+
+    const selectedRequestsLabel = await screen.findByText('Selected requests')
+    expect(selectedRequestsLabel.nextElementSibling).toHaveTextContent('3')
+    await userEvent.click(screen.getByRole('switch', { name: /disable api\.example\.test/i }))
+
+    await waitFor(() => expect(selectedRequestsLabel.nextElementSibling).toHaveTextContent('0'))
+    expect(screen.getByText('3 req')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: /enable api\.example\.test/i })).toBeInTheDocument()
   })
 })
