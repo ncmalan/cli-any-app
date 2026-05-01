@@ -15,6 +15,7 @@ async def secure_db(tmp_path):
         "host": settings.host,
         "port": settings.port,
         "ws_allowed_origins": settings.ws_allowed_origins,
+        "cookie_secure": settings.cookie_secure,
     }
     settings.test_auto_auth = False
     settings.data_dir = tmp_path / "data"
@@ -43,6 +44,21 @@ async def _login(client: AsyncClient) -> str:
 async def test_rest_requires_authentication(client):
     resp = await client.get("/api/sessions")
     assert resp.status_code == 401
+    assert "connect-src 'self'" in resp.headers["content-security-policy"]
+    assert " ws:" not in resp.headers["content-security-policy"]
+    assert " wss:" not in resp.headers["content-security-policy"]
+
+
+async def test_auth_middleware_does_not_swallow_unexpected_errors(client, monkeypatch):
+    import cli_any_app.main as main
+
+    def broken_auth(_request):
+        raise RuntimeError("unexpected auth bug")
+
+    monkeypatch.setattr(main, "require_http_auth", broken_auth)
+
+    with pytest.raises(RuntimeError, match="unexpected auth bug"):
+        await client.get("/api/sessions")
 
 
 async def test_state_change_requires_csrf(client):
@@ -67,6 +83,35 @@ async def test_ws_token_requires_authentication(client):
     authed = await client.get("/api/auth/ws-token")
     assert authed.status_code == 200
     assert authed.json()["token"]
+
+
+def test_session_cookie_secure_attribute_is_configurable():
+    from fastapi import Response
+
+    from cli_any_app.config import settings
+    from cli_any_app.security import clear_session_cookie, create_session_cookie
+
+    settings.cookie_secure = True
+    response = Response()
+    create_session_cookie(response)
+
+    set_cookie_headers = [
+        value.decode()
+        for name, value in response.raw_headers
+        if name.decode().lower() == "set-cookie"
+    ]
+    assert len(set_cookie_headers) == 2
+    assert all("Secure" in header for header in set_cookie_headers)
+
+    logout_response = Response()
+    clear_session_cookie(logout_response)
+    delete_cookie_headers = [
+        value.decode()
+        for name, value in logout_response.raw_headers
+        if name.decode().lower() == "set-cookie"
+    ]
+    assert len(delete_cookie_headers) == 2
+    assert all("Secure" in header for header in delete_cookie_headers)
 
 
 async def test_capture_requires_valid_recording_token(client, monkeypatch):

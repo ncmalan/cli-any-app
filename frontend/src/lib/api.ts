@@ -2,7 +2,8 @@ const BASE = '/api'
 
 function csrfToken(): string {
   const match = document.cookie
-    .split('; ')
+    .split(';')
+    .map(row => row.trim())
     .find(row => row.startsWith('cli_any_app_csrf='))
   return match ? decodeURIComponent(match.split('=')[1]) : ''
 }

@@ -137,7 +137,7 @@ def create_session_cookie(response: Response) -> str:
         session_token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=settings.cookie_secure,
         max_age=settings.session_ttl_seconds,
     )
     response.set_cookie(
@@ -145,15 +145,15 @@ def create_session_cookie(response: Response) -> str:
         csrf,
         httponly=False,
         samesite="lax",
-        secure=False,
+        secure=settings.cookie_secure,
         max_age=settings.session_ttl_seconds,
     )
     return csrf
 
 
 def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(settings.auth_cookie_name)
-    response.delete_cookie(settings.csrf_cookie_name)
+    response.delete_cookie(settings.auth_cookie_name, secure=settings.cookie_secure)
+    response.delete_cookie(settings.csrf_cookie_name, secure=settings.cookie_secure)
 
 
 def session_from_request(request: Request) -> dict[str, Any] | None:

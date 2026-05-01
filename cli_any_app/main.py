@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from cli_any_app.api.auth import router as auth_router
@@ -63,7 +63,7 @@ def _apply_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
+        "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
     )
     return response
 
@@ -77,10 +77,8 @@ async def auth_middleware(request: Request, call_next):
             session = require_http_auth(request)
             if request.method not in {"GET", "HEAD", "OPTIONS"}:
                 require_csrf(request, session)
-        except Exception as exc:
-            status_code = getattr(exc, "status_code", 401)
-            detail = getattr(exc, "detail", "Authentication required")
-            return _apply_security_headers(JSONResponse({"detail": detail}, status_code=status_code))
+        except HTTPException as exc:
+            return _apply_security_headers(JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
     response = await call_next(request)
     if path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")

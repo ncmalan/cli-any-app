@@ -188,6 +188,7 @@ All settings can be overridden via environment variables with the `CLI_ANY_APP_`
 | `CLI_ANY_APP_DEBUG` | `false` | Enable debug mode with auto-reload |
 | `CLI_ANY_APP_ALLOW_LAN` | `false` | Required to bind the web server to a LAN address |
 | `CLI_ANY_APP_ADMIN_PASSWORD` | *(generated on first run)* | Initial local operator password |
+| `CLI_ANY_APP_COOKIE_SECURE` | `false` | Set `true` when serving through HTTPS so auth cookies are Secure |
 | `CLI_ANY_APP_RAW_BODY_CAPTURE_ENABLED` | `false` | Store encrypted raw payloads and redacted samples |
 | `CLI_ANY_APP_ANTHROPIC_API_KEY` | *(required for generation)* | Anthropic API key for Claude |
 

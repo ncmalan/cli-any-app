@@ -236,7 +236,7 @@ def _hash_generated_files(package_path: str) -> dict[str, str]:
 async def get_generation_status(session_id: str):
     async with get_session() as db:
         session = await db.get(Session, session_id)
-        if not session:
+        if not session or session.status == "deleted":
             raise HTTPException(404, "Session not found")
         latest = await db.execute(
             select(GenerationAttempt)

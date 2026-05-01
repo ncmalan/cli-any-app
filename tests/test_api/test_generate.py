@@ -193,3 +193,16 @@ async def test_approve_generation_attempt_rejects_failed_validation(client):
         json={"reason": "Trying to approve failed output"},
     )
     assert resp.status_code == 409
+
+
+async def test_generation_status_hides_deleted_sessions(client):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Deleted", app_name="test-app", status="deleted")
+        db.add(session)
+        await db.commit()
+        session_id = session.id
+
+    resp = await client.get(f"/api/sessions/{session_id}/status")
+    assert resp.status_code == 404

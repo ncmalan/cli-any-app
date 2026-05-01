@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     admin_password: str = ""
     auth_cookie_name: str = "cli_any_app_session"
     csrf_cookie_name: str = "cli_any_app_csrf"
+    cookie_secure: bool = False
     session_ttl_seconds: int = 60 * 60 * 12
     ws_token_ttl_seconds: int = 60
     ws_allowed_origins: list[str] = []
