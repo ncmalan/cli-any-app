@@ -99,22 +99,61 @@ def _check_ast_safety(
     errors: list[str],
     allowed_import_roots: set[str],
 ) -> None:
+    unsafe_call_names = {name: name for name in UNSAFE_CALLS}
+    unsafe_module_aliases: dict[str, str] = {"os": "os", "importlib": "importlib"}
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 _check_import_allowed(alias.name, rel_path, errors, allowed_import_roots)
+                root = alias.name.split(".", 1)[0]
+                if root in unsafe_module_aliases.values():
+                    unsafe_module_aliases[alias.asname or root] = root
         elif isinstance(node, ast.ImportFrom):
             if node.level == 0 and node.module:
                 _check_import_allowed(node.module, rel_path, errors, allowed_import_roots)
-        elif isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id in UNSAFE_CALLS:
-                errors.append(f"Unsafe call in {rel_path}: {node.func.id}")
-            if isinstance(node.func, ast.Attribute):
-                owner = node.func.value
-                if isinstance(owner, ast.Name) and owner.id == "os" and node.func.attr == "system":
-                    errors.append(f"Unsafe call in {rel_path}: os.system")
-                if isinstance(owner, ast.Name) and owner.id == "importlib" and node.func.attr == "import_module":
-                    errors.append(f"Unsafe call in {rel_path}: importlib.import_module")
+                _track_imported_unsafe_calls(node, unsafe_call_names)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            _check_unsafe_call(node, rel_path, errors, unsafe_call_names, unsafe_module_aliases)
+
+
+def _track_imported_unsafe_calls(node: ast.ImportFrom, unsafe_call_names: dict[str, str]) -> None:
+    unsafe_members = {
+        "os": {"system": "os.system"},
+        "importlib": {"import_module": "importlib.import_module"},
+    }
+    module_members = unsafe_members.get(node.module or "")
+    if not module_members:
+        return
+
+    for alias in node.names:
+        if alias.name == "*":
+            for member, canonical_name in module_members.items():
+                unsafe_call_names[member] = canonical_name
+        elif alias.name in module_members:
+            unsafe_call_names[alias.asname or alias.name] = module_members[alias.name]
+
+
+def _check_unsafe_call(
+    node: ast.Call,
+    rel_path: Path,
+    errors: list[str],
+    unsafe_call_names: dict[str, str],
+    unsafe_module_aliases: dict[str, str],
+) -> None:
+    if isinstance(node.func, ast.Name) and node.func.id in unsafe_call_names:
+        errors.append(f"Unsafe call in {rel_path}: {unsafe_call_names[node.func.id]}")
+    if isinstance(node.func, ast.Attribute):
+        owner = node.func.value
+        if not isinstance(owner, ast.Name):
+            return
+        owner_module = unsafe_module_aliases.get(owner.id)
+        if owner_module == "os" and node.func.attr == "system":
+            errors.append(f"Unsafe call in {rel_path}: os.system")
+        if owner_module == "importlib" and node.func.attr == "import_module":
+            errors.append(f"Unsafe call in {rel_path}: importlib.import_module")
 
 
 def _check_import_allowed(

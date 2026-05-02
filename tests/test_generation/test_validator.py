@@ -144,6 +144,32 @@ name = "test"
     assert "Executable build hook not allowed: setup.py" in result["errors"]
 
 
+def test_rejects_aliased_unsafe_calls(tmp_path):
+    pkg = tmp_path / "test-app"
+    pkg.mkdir()
+    (pkg / "pyproject.toml").write_text("[project]\nname = 'test'\n")
+    (pkg / "SKILL.md").write_text("# Test\n")
+    pkg_dir = pkg / "test_app"
+    pkg_dir.mkdir()
+    (pkg_dir / "cli.py").write_text(
+        "import os as safe_os\n"
+        "import importlib as loader\n"
+        "from os import system as run_shell\n"
+        "from importlib import import_module as load_module\n\n"
+        "safe_os.system('echo unsafe')\n"
+        "loader.import_module('unsafe')\n"
+        "run_shell('echo unsafe')\n"
+        "load_module('unsafe')\n"
+    )
+    (pkg_dir / "__init__.py").write_text("")
+
+    result = validate_generated_cli(pkg)
+
+    assert result["valid"] is False
+    assert result["errors"].count("Unsafe call in test_app/cli.py: os.system") == 2
+    assert result["errors"].count("Unsafe call in test_app/cli.py: importlib.import_module") == 2
+
+
 def test_rejects_local_build_backend_path(tmp_path):
     pkg = tmp_path / "test-app"
     pkg.mkdir()
