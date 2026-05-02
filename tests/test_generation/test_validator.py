@@ -11,12 +11,43 @@ def test_valid_package(tmp_path):
     (pkg / "SKILL.md").write_text("# Test\n")
     pkg_dir = pkg / "test_app"
     pkg_dir.mkdir()
-    (pkg_dir / "cli.py").write_text("import click\n\n@click.group()\ndef cli(): pass\n")
+    (pkg_dir / "helpers.py").write_text("VALUE = 1\n")
+    (pkg_dir / "cli.py").write_text(
+        "import json\n\n"
+        "import click\n"
+        "from test_app.helpers import VALUE\n\n"
+        "@click.group()\n"
+        "def cli():\n"
+        "    json.dumps(VALUE)\n"
+    )
     (pkg_dir / "__init__.py").write_text("")
 
     result = validate_generated_cli(pkg)
     assert result["valid"] is True
     assert len(result["errors"]) == 0
+
+
+def test_rejects_non_stdlib_non_allowlisted_imports(tmp_path):
+    pkg = tmp_path / "test-app"
+    pkg.mkdir()
+    (pkg / "pyproject.toml").write_text("[project]\nname = 'test'\n")
+    (pkg / "SKILL.md").write_text("# Test\n")
+    pkg_dir = pkg / "test_app"
+    pkg_dir.mkdir()
+    (pkg_dir / "cli.py").write_text("import click\nimport rich\nfrom pandas import DataFrame\n")
+    (pkg_dir / "__init__.py").write_text("")
+
+    result = validate_generated_cli(pkg)
+
+    assert result["valid"] is False
+    assert any(
+        "Import not allowed" in error and "rich" in error
+        for error in result["errors"]
+    )
+    assert any(
+        "Import not allowed" in error and "pandas" in error
+        for error in result["errors"]
+    )
 
 
 def test_missing_files(tmp_path):

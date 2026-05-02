@@ -27,16 +27,6 @@ class DomainToggle(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
 
-_domain_filters: dict[str, dict[str, bool]] = {}
-
-
-def is_domain_enabled(session_id: str, domain: str) -> bool:
-    """Compatibility fallback for legacy tests; generation uses persisted filters."""
-    filters = _domain_filters.get(session_id, {})
-    normalized = normalize_domain(domain)
-    return filters.get(normalized, filters.get(domain, not matches_noise_pattern(normalized)))
-
-
 async def load_domain_enabled_map(db, session_id: str) -> dict[str, bool]:
     result = await db.execute(select(DomainFilter).where(DomainFilter.session_id == session_id))
     return {normalize_domain(row.domain): row.enabled for row in result.scalars().all()}

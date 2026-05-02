@@ -43,6 +43,7 @@ class FakeWebSocket {
   onclose: (() => void) | null = null
   onmessage: ((event: MessageEvent<string>) => void) | null = null
   readonly url: string
+  closed = false
 
   constructor(url: string) {
     this.url = url
@@ -51,6 +52,7 @@ class FakeWebSocket {
   }
 
   close() {
+    this.closed = true
     this.onclose?.()
   }
 }
@@ -72,15 +74,21 @@ afterEach(() => {
 })
 
 describe('GenerationProgress status handling', () => {
-  it('shows validation_failed on the Validate step and clears websocket handlers on cleanup', async () => {
+  it('shows validation_failed on the Validate step and closes the websocket', async () => {
     vi.stubGlobal('WebSocket', FakeWebSocket)
     server.use(
-      http.get('/api/sessions/s1', () => HttpResponse.json(validationFailedSession)),
-      http.get('/api/sessions/s1/status', () => HttpResponse.json({
-        session_id: 's1',
-        status: 'validation_failed',
-        latest_attempt: attemptWithStatus('validation_failed'),
-      })),
+      http.get('/api/sessions/s1', async () => {
+        await new Promise(resolve => setTimeout(resolve, 20))
+        return HttpResponse.json(validationFailedSession)
+      }),
+      http.get('/api/sessions/s1/status', async () => {
+        await new Promise(resolve => setTimeout(resolve, 20))
+        return HttpResponse.json({
+          session_id: 's1',
+          status: 'validation_failed',
+          latest_attempt: attemptWithStatus('validation_failed'),
+        })
+      }),
       http.get('/api/auth/ws-token', () => HttpResponse.json({ token: 'generation-ws-token' })),
     )
 
@@ -93,10 +101,11 @@ describe('GenerationProgress status handling', () => {
     })
 
     const ws = FakeWebSocket.instances[0]
-    view.unmount()
+    await waitFor(() => expect(ws.closed).toBe(true))
     expect(ws.onopen).toBeNull()
     expect(ws.onclose).toBeNull()
     expect(ws.onmessage).toBeNull()
+    view.unmount()
   })
 
   it('treats needs_review as a terminal Validate failure', async () => {

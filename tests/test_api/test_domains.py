@@ -80,9 +80,6 @@ async def test_list_domains_empty_session(client):
 
 
 async def test_toggle_domain(client):
-    from cli_any_app.api.domains import _domain_filters
-
-    _domain_filters.clear()
     session_id = await _create_session_with_requests(client)
 
     # Enable a noise domain
@@ -102,7 +99,6 @@ async def test_toggle_domain(client):
     resp = await client.get(f"/api/sessions/{session_id}/domains")
     fb_domain = [d for d in resp.json() if d["domain"] == "tracking.facebook.com"][0]
     assert fb_domain["enabled"] is True
-    assert _domain_filters == {}
 
 
 async def test_toggle_domain_disable(client):

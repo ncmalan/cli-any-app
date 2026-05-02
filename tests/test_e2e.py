@@ -6,9 +6,6 @@ from httpx import ASGITransport, AsyncClient
 async def setup_db(tmp_path):
     from cli_any_app.models.database import init_db
     await init_db(f"sqlite+aiosqlite:///{tmp_path}/test.db")
-    # Reset the in-memory domain filter state between tests
-    from cli_any_app.api.domains import _domain_filters
-    _domain_filters.clear()
     yield
 
 

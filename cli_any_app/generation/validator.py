@@ -15,11 +15,13 @@ UNSAFE_BUILD_HOOK_FILES = {"setup.py"}
 UNSAFE_IMPORTS = {"subprocess", "socket", "ftplib", "telnetlib", "pickle", "marshal"}
 UNSAFE_CALLS = {"eval", "exec", "compile", "__import__"}
 SAFE_PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+STDLIB_MODULES = set(getattr(sys, "stdlib_module_names", ())) | {"__future__"}
 
 
 def validate_generated_cli(package_dir: Path, *, run_smoke: bool = False) -> dict:
     errors = []
     warnings = []
+    allowed_import_roots = STDLIB_MODULES | ALLOWED_DEPENDENCIES | _local_import_roots(package_dir)
 
     # Check all .py files compile
     for py_file in package_dir.rglob("*.py"):
@@ -58,7 +60,7 @@ def validate_generated_cli(package_dir: Path, *, run_smoke: bool = False) -> dic
         for cli_module in cli_modules:
             try:
                 tree = ast.parse(cli_module.read_text())
-                _check_ast_safety(tree, cli_module.relative_to(package_dir), errors)
+                _check_ast_safety(tree, cli_module.relative_to(package_dir), errors, allowed_import_roots)
             except SyntaxError as e:
                 errors.append(f"CLI module parse error in {cli_module.relative_to(package_dir)}: {e}")
     else:
@@ -71,7 +73,7 @@ def validate_generated_cli(package_dir: Path, *, run_smoke: bool = False) -> dic
             tree = ast.parse(py_file.read_text())
         except SyntaxError:
             continue
-        _check_ast_safety(tree, py_file.relative_to(package_dir), errors)
+        _check_ast_safety(tree, py_file.relative_to(package_dir), errors, allowed_import_roots)
 
     if run_smoke and not errors:
         _run_isolated_smoke_test(package_dir, errors, warnings)
@@ -83,17 +85,27 @@ def validate_generated_cli(package_dir: Path, *, run_smoke: bool = False) -> dic
     }
 
 
-def _check_ast_safety(tree: ast.AST, rel_path: Path, errors: list[str]) -> None:
+def _local_import_roots(package_dir: Path) -> set[str]:
+    roots = {py_file.stem for py_file in package_dir.glob("*.py") if py_file.stem != "__init__"}
+    for init_file in package_dir.rglob("__init__.py"):
+        if init_file.parent != package_dir:
+            roots.add(init_file.parent.name)
+    return roots
+
+
+def _check_ast_safety(
+    tree: ast.AST,
+    rel_path: Path,
+    errors: list[str],
+    allowed_import_roots: set[str],
+) -> None:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                root = alias.name.split(".", 1)[0]
-                if root in UNSAFE_IMPORTS:
-                    errors.append(f"Unsafe import in {rel_path}: {alias.name}")
+                _check_import_allowed(alias.name, rel_path, errors, allowed_import_roots)
         elif isinstance(node, ast.ImportFrom):
-            root = (node.module or "").split(".", 1)[0]
-            if root in UNSAFE_IMPORTS:
-                errors.append(f"Unsafe import in {rel_path}: {node.module}")
+            if node.level == 0 and node.module:
+                _check_import_allowed(node.module, rel_path, errors, allowed_import_roots)
         elif isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in UNSAFE_CALLS:
                 errors.append(f"Unsafe call in {rel_path}: {node.func.id}")
@@ -101,6 +113,21 @@ def _check_ast_safety(tree: ast.AST, rel_path: Path, errors: list[str]) -> None:
                 owner = node.func.value
                 if isinstance(owner, ast.Name) and owner.id == "os" and node.func.attr == "system":
                     errors.append(f"Unsafe call in {rel_path}: os.system")
+                if isinstance(owner, ast.Name) and owner.id == "importlib" and node.func.attr == "import_module":
+                    errors.append(f"Unsafe call in {rel_path}: importlib.import_module")
+
+
+def _check_import_allowed(
+    module_name: str,
+    rel_path: Path,
+    errors: list[str],
+    allowed_import_roots: set[str],
+) -> None:
+    root = module_name.split(".", 1)[0]
+    if root in UNSAFE_IMPORTS:
+        errors.append(f"Unsafe import in {rel_path}: {module_name}")
+    elif root not in allowed_import_roots:
+        errors.append(f"Import not allowed in {rel_path}: {module_name}")
 
 
 def _validate_generated_build_hooks(package_dir: Path, errors: list[str]) -> None:

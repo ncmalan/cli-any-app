@@ -62,6 +62,16 @@ function stepLabel(step: string): string {
   }
 }
 
+function closeWebSocket(wsRef: { current: WebSocket | null }) {
+  const ws = wsRef.current
+  if (!ws) return
+  ws.onopen = null
+  ws.onclose = null
+  ws.onmessage = null
+  ws.close()
+  if (wsRef.current === ws) wsRef.current = null
+}
+
 export default function GenerationProgress() {
   const { id } = useParams<{ id: string }>()
   const [session, setSession] = useState<Session | null>(null)
@@ -75,6 +85,7 @@ export default function GenerationProgress() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
+  const isTerminalStatus = session?.status ? TERMINAL_STATUSES.includes(session.status) : false
 
   // Poll session status
   useEffect(() => {
@@ -107,6 +118,12 @@ export default function GenerationProgress() {
   // WebSocket for live progress
   useEffect(() => {
     if (!id) return
+    if (isTerminalStatus) {
+      closeWebSocket(wsRef)
+      setWsState('disconnected')
+      return
+    }
+
     let cancelled = false
     async function connect() {
       setWsState('connecting')
@@ -147,16 +164,9 @@ export default function GenerationProgress() {
     connect()
     return () => {
       cancelled = true
-      const ws = wsRef.current
-      if (ws) {
-        ws.onopen = null
-        ws.onclose = null
-        ws.onmessage = null
-        ws.close()
-        if (wsRef.current === ws) wsRef.current = null
-      }
+      closeWebSocket(wsRef)
     }
-  }, [id])
+  }, [id, isTerminalStatus])
 
   // Auto-scroll log
   useEffect(() => {

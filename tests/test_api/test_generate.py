@@ -14,10 +14,8 @@ from cli_any_app.models.session import Session
 @pytest.fixture(autouse=True)
 async def setup_db(tmp_path):
     from cli_any_app.models.database import init_db
-    from cli_any_app.api.domains import _domain_filters
 
     await init_db(f"sqlite+aiosqlite:///{tmp_path}/test.db")
-    _domain_filters.clear()
     yield
 
 
