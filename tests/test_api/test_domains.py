@@ -130,6 +130,92 @@ async def test_toggle_domain_rejects_empty_normalized_domain(client):
     assert resp.json()["detail"] == "Domain is required"
 
 
+async def test_toggle_domain_rejects_like_wildcard_characters(client):
+    from cli_any_app.models.database import get_session
+    from cli_any_app.models.domain_filter import DomainFilter
+
+    session_id = await _create_session_with_requests(client)
+
+    percent = await client.put(
+        f"/api/sessions/{session_id}/domains/api%25.example.com",
+        json={"enabled": False},
+    )
+    assert percent.status_code == 400
+    assert percent.json()["detail"] == "Domain contains invalid characters"
+
+    underscore = await client.put(
+        f"/api/sessions/{session_id}/domains/api_.example.com",
+        json={"enabled": False},
+    )
+    assert underscore.status_code == 400
+    assert underscore.json()["detail"] == "Domain contains invalid characters"
+
+    malformed = await client.put(
+        f"/api/sessions/{session_id}/domains/api$.example.com",
+        json={"enabled": False},
+    )
+    assert malformed.status_code == 400
+    assert malformed.json()["detail"] == "Domain contains invalid characters"
+
+    async with get_session() as db:
+        filters = await db.execute(select(DomainFilter).where(DomainFilter.session_id == session_id))
+        assert filters.scalars().all() == []
+
+
+async def test_domain_listing_groups_by_stored_host_before_url_fallback(client):
+    from cli_any_app.models.database import get_session
+    from cli_any_app.models.flow import Flow
+    from cli_any_app.models.request import CapturedRequest
+    from cli_any_app.models.session import Session
+
+    session = Session(name="Host grouping", app_name="app")
+    async with get_session() as db:
+        db.add(session)
+        await db.flush()
+        flow = Flow(session_id=session.id, label="Flow", order=1)
+        db.add(flow)
+        await db.flush()
+        db.add_all(
+            [
+                CapturedRequest(
+                    flow_id=flow.id,
+                    method="GET",
+                    url="https://url-should-not-win.example/one",
+                    host="api.example.com:443",
+                    status_code=200,
+                    is_api=True,
+                ),
+                CapturedRequest(
+                    flow_id=flow.id,
+                    method="GET",
+                    url="https://also-not-used.example/two",
+                    host="api.example.com",
+                    status_code=200,
+                    is_api=False,
+                ),
+                CapturedRequest(
+                    flow_id=flow.id,
+                    method="GET",
+                    url="https://legacy.example.com/fallback",
+                    host="",
+                    status_code=200,
+                    is_api=True,
+                ),
+            ]
+        )
+        await db.commit()
+        session_id = session.id
+
+    resp = await client.get(f"/api/sessions/{session_id}/domains")
+    assert resp.status_code == 200
+    domains = {item["domain"]: item for item in resp.json()}
+    assert set(domains) == {"api.example.com", "legacy.example.com"}
+    assert domains["api.example.com"]["request_count"] == 2
+    assert domains["api.example.com"]["api_request_count"] == 1
+    assert domains["legacy.example.com"]["request_count"] == 1
+    assert domains["legacy.example.com"]["api_request_count"] == 1
+
+
 async def test_domain_listing_normalizes_host_before_noise_detection(client):
     from cli_any_app.models.database import get_session
     from cli_any_app.models.flow import Flow

@@ -1,3 +1,6 @@
+import ipaddress
+import re
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select
@@ -12,6 +15,8 @@ from cli_any_app.models.request import CapturedRequest
 from cli_any_app.models.session import Session
 
 router = APIRouter(prefix="/api/sessions/{session_id}/domains", tags=["domains"])
+INVALID_DOMAIN_CHARS = {"%", "_", "/", "?", "#", "[", "]", "@", "\\"}
+HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
 class DomainInfo(BaseModel):
@@ -37,35 +42,127 @@ def domain_enabled_from_map(filters: dict[str, bool], domain: str) -> bool:
     return filters.get(normalized, filters.get(domain, not matches_noise_pattern(normalized)))
 
 
+def _clean_domain_param(domain: str) -> str:
+    normalized = normalize_domain(domain).rstrip(".")
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Domain is required")
+    if not _is_valid_domain_name(normalized):
+        raise HTTPException(status_code=400, detail="Domain contains invalid characters")
+    return normalized
+
+
+def _is_valid_domain_name(domain: str) -> bool:
+    if any(char in domain for char in INVALID_DOMAIN_CHARS):
+        return False
+    try:
+        ipaddress.ip_address(domain)
+        return True
+    except ValueError:
+        pass
+    return all(HOST_LABEL_RE.fullmatch(label) for label in domain.split("."))
+
+
+def _escape_like_literal(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _domain_request_filter(domain: str):
     url_hosts = [domain]
+    escaped_domain = _escape_like_literal(domain)
     host_clauses = [
         CapturedRequest.host == domain,
-        CapturedRequest.host.like(f"{domain}:%"),
+        CapturedRequest.host.like(f"{escaped_domain}:%", escape="\\"),
     ]
     if ":" in domain:
         bracketed = f"[{domain}]"
+        escaped_bracketed = _escape_like_literal(bracketed)
         url_hosts = [bracketed]
         host_clauses.extend([
             CapturedRequest.host == bracketed,
-            CapturedRequest.host.like(f"{bracketed}:%"),
+            CapturedRequest.host.like(f"{escaped_bracketed}:%", escape="\\"),
         ])
 
     url_clauses = []
     for url_host in url_hosts:
         for scheme in ("http", "https"):
             base = f"{scheme}://{url_host}"
+            escaped_base = _escape_like_literal(base)
             url_clauses.extend([
                 CapturedRequest.url == base,
-                CapturedRequest.url.like(f"{base}/%"),
-                CapturedRequest.url.like(f"{base}?%"),
-                CapturedRequest.url.like(f"{base}:%"),
+                CapturedRequest.url.like(f"{escaped_base}/%", escape="\\"),
+                CapturedRequest.url.like(f"{escaped_base}?%", escape="\\"),
+                CapturedRequest.url.like(f"{escaped_base}:%", escape="\\"),
             ])
     return or_(*(host_clauses + url_clauses))
 
 
-def _domain_candidate(host: str | None, url: str) -> str:
-    return normalize_domain(host or "") or extract_domain(url)
+def _api_count_expr():
+    return func.coalesce(
+        func.sum(case((CapturedRequest.is_api.is_(True), 1), else_=0)),
+        0,
+    )
+
+
+def _add_domain_count(
+    domain_counts: dict[str, tuple[int, int]],
+    domain: str,
+    request_count: int,
+    api_request_count: int,
+) -> None:
+    if not domain:
+        return
+    total_count, total_api_count = domain_counts.get(domain, (0, 0))
+    domain_counts[domain] = (
+        total_count + int(request_count or 0),
+        total_api_count + int(api_request_count or 0),
+    )
+
+
+async def _load_domain_counts(db, session_id: str) -> dict[str, tuple[int, int]]:
+    domain_counts: dict[str, tuple[int, int]] = {}
+    host_result = await db.execute(
+        select(
+            CapturedRequest.host,
+            func.count(CapturedRequest.id),
+            _api_count_expr(),
+        )
+        .join(Flow)
+        .where(
+            Flow.session_id == session_id,
+            CapturedRequest.host.is_not(None),
+            CapturedRequest.host != "",
+        )
+        .group_by(CapturedRequest.host)
+    )
+    for host, request_count, api_request_count in host_result.all():
+        _add_domain_count(
+            domain_counts,
+            normalize_domain(host),
+            request_count,
+            api_request_count,
+        )
+
+    legacy_url_result = await db.execute(
+        select(
+            CapturedRequest.url,
+            func.count(CapturedRequest.id),
+            _api_count_expr(),
+        )
+        .join(Flow)
+        .where(
+            Flow.session_id == session_id,
+            or_(CapturedRequest.host.is_(None), CapturedRequest.host == ""),
+        )
+        .group_by(CapturedRequest.url)
+    )
+    for url, request_count, api_request_count in legacy_url_result.all():
+        _add_domain_count(
+            domain_counts,
+            extract_domain(url),
+            request_count,
+            api_request_count,
+        )
+    return domain_counts
 
 
 @router.get("", response_model=list[DomainInfo])
@@ -74,23 +171,8 @@ async def list_domains(session_id: str):
         session = await db.get(Session, session_id)
         if not session or session.status == "deleted":
             raise HTTPException(status_code=404, detail="Session not found")
-        result = await db.execute(
-            select(CapturedRequest.host, CapturedRequest.url, CapturedRequest.is_api)
-            .join(Flow)
-            .where(Flow.session_id == session_id)
-        )
-        rows = result.all()
+        domain_counts = await _load_domain_counts(db, session_id)
         filters = await load_domain_enabled_map(db, session_id)
-
-    domain_counts: dict[str, tuple[int, int]] = {}
-    for host, url, is_api in rows:
-        d = _domain_candidate(host, url)
-        if d:
-            total_count, total_api_count = domain_counts.get(d, (0, 0))
-            domain_counts[d] = (
-                total_count + 1,
-                total_api_count + int(bool(is_api)),
-            )
 
     domains = []
     for domain, (count, api_request_count) in sorted(domain_counts.items(), key=lambda x: -x[1][0]):
@@ -110,9 +192,7 @@ async def list_domains(session_id: str):
 
 @router.put("/{domain}", response_model=DomainInfo)
 async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
-    domain = normalize_domain(domain)
-    if not domain:
-        raise HTTPException(status_code=400, detail="Domain is required")
+    domain = _clean_domain_param(domain)
     reason = body.reason.strip() if body.reason is not None else None
     if body.reason is not None and not reason:
         raise HTTPException(status_code=400, detail="Domain filter reason cannot be blank")
