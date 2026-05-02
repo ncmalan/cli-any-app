@@ -44,9 +44,10 @@ async def _login(client: AsyncClient) -> str:
 async def test_rest_requires_authentication(client):
     resp = await client.get("/api/sessions")
     assert resp.status_code == 401
-    assert "connect-src 'self'" in resp.headers["content-security-policy"]
-    assert " ws:" not in resp.headers["content-security-policy"]
-    assert " wss:" not in resp.headers["content-security-policy"]
+    csp = resp.headers["content-security-policy"]
+    assert "connect-src 'self' ws://testserver wss://testserver" in csp
+    assert " ws: " not in csp
+    assert " wss: " not in csp
 
 
 async def test_auth_middleware_does_not_swallow_unexpected_errors(client, monkeypatch):

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from cli_any_app.audit import record_audit_event
 from cli_any_app.capture.filters import extract_domain, normalize_domain
@@ -46,12 +46,31 @@ def domain_enabled_from_map(filters: dict[str, bool], domain: str) -> bool:
     return filters.get(normalized, filters.get(domain, not matches_noise_pattern(normalized)))
 
 
-def _count_matching_domain(rows, domain: str) -> int:
-    return sum(
-        1
-        for url, host in rows
-        if normalize_domain(host or extract_domain(url)) == domain
-    )
+def _domain_request_filter(domain: str):
+    url_hosts = [domain]
+    host_clauses = [
+        CapturedRequest.host == domain,
+        CapturedRequest.host.like(f"{domain}:%"),
+    ]
+    if ":" in domain:
+        bracketed = f"[{domain}]"
+        url_hosts = [bracketed]
+        host_clauses.extend([
+            CapturedRequest.host == bracketed,
+            CapturedRequest.host.like(f"{bracketed}:%"),
+        ])
+
+    url_clauses = []
+    for url_host in url_hosts:
+        for scheme in ("http", "https"):
+            base = f"{scheme}://{url_host}"
+            url_clauses.extend([
+                CapturedRequest.url == base,
+                CapturedRequest.url.like(f"{base}/%"),
+                CapturedRequest.url.like(f"{base}?%"),
+                CapturedRequest.url.like(f"{base}:%"),
+            ])
+    return or_(*(host_clauses + url_clauses))
 
 
 @router.get("", response_model=list[DomainInfo])
@@ -94,11 +113,11 @@ async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
         if not session or session.status == "deleted":
             raise HTTPException(status_code=404, detail="Session not found")
         count_result = await db.execute(
-            select(CapturedRequest.url, CapturedRequest.host)
+            select(func.count(CapturedRequest.id))
             .join(Flow)
-            .where(Flow.session_id == session_id)
+            .where(Flow.session_id == session_id, _domain_request_filter(domain))
         )
-        request_count = _count_matching_domain(count_result.all(), domain)
+        request_count = int(count_result.scalar_one() or 0)
         result = await db.execute(
             select(DomainFilter).where(
                 DomainFilter.session_id == session_id,

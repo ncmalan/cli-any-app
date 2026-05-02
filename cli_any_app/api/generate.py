@@ -68,6 +68,8 @@ async def start_generation(
             raise HTTPException(404, "Session not found")
         if session.status == "recording":
             raise HTTPException(409, "Stop recording before generation")
+        if session.status == "generating":
+            raise HTTPException(409, "Generation already in progress")
         if not settings.test_auto_auth and not (body and body.reviewer_acknowledged):
             raise HTTPException(400, "Reviewer acknowledgement is required")
 

@@ -88,6 +88,21 @@ async def test_start_generation_respects_disabled_domains(client):
     ]
 
 
+async def test_start_generation_rejects_concurrent_generation(client):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app", status="generating")
+        db.add(session)
+        await db.commit()
+        session_id = session.id
+
+    resp = await client.post(f"/api/sessions/{session_id}/generate")
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Generation already in progress"
+
+
 async def test_run_generation_upserts_generated_cli(tmp_path):
     from cli_any_app.models.database import get_session
 

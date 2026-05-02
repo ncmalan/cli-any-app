@@ -57,13 +57,32 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="cli-any-app", lifespan=lifespan)
 
 
-def _apply_security_headers(response):
+def _host_with_optional_port(host: str, port: int | None) -> str:
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"{host}:{port}" if port is not None else host
+
+
+def _websocket_csp_sources(request: Request | None) -> str:
+    if request is not None:
+        host = request.url.hostname or settings.host
+        port = request.url.port
+    else:
+        host = settings.host
+        port = settings.port
+    host_port = _host_with_optional_port(host, port)
+    return f"ws://{host_port} wss://{host_port}"
+
+
+def _apply_security_headers(response, request: Request | None = None):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "same-origin")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
+        "default-src 'self'; "
+        f"connect-src 'self' {_websocket_csp_sources(request)}; "
+        "img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
     )
     return response
 
@@ -78,11 +97,14 @@ async def auth_middleware(request: Request, call_next):
             if request.method not in {"GET", "HEAD", "OPTIONS"}:
                 require_csrf(request, session)
         except HTTPException as exc:
-            return _apply_security_headers(JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
+            return _apply_security_headers(
+                JSONResponse({"detail": exc.detail}, status_code=exc.status_code),
+                request,
+            )
     response = await call_next(request)
     if path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
-    return _apply_security_headers(response)
+    return _apply_security_headers(response, request)
 
 
 app.include_router(auth_router)
