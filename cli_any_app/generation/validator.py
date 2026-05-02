@@ -171,14 +171,23 @@ def _run_isolated_smoke_test(package_dir: Path, errors: list[str], warnings: lis
             errors.append(f"Smoke install failed: {install.stdout[-1000:]}")
             return
 
-        help_run = subprocess.run(
-            [*_console_script_command(env_dir, script_name), "--help"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=30,
-            check=False,
-        )
+        console_script = _console_script_command(env_dir, script_name)
+        if not Path(console_script[0]).exists():
+            errors.append(f"Console script not found after install: {script_name}")
+            return
+
+        try:
+            help_run = subprocess.run(
+                [*console_script, "--help"],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=30,
+                check=False,
+            )
+        except OSError as e:
+            errors.append(f"Smoke --help failed to start: {e}")
+            return
         if help_run.returncode != 0:
             errors.append(f"Smoke --help failed: {help_run.stdout[-1000:]}")
 
