@@ -74,12 +74,17 @@ class RawPayloadResponse(BaseModel):
     response_body: str | None
 
 
+async def _get_active_session(db, session_id: str) -> Session:
+    session = await db.get(Session, session_id)
+    if not session or session.status == "deleted":
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
 @router.post("", status_code=201, response_model=FlowResponse)
 async def create_flow(session_id: str, body: FlowCreate):
     async with get_session() as db:
-        session = await db.get(Session, session_id)
-        if not session or session.status == "deleted":
-            raise HTTPException(status_code=404, detail="Session not found")
+        session = await _get_active_session(db, session_id)
         if session.status != "recording" and not settings.test_auto_auth:
             raise HTTPException(status_code=409, detail="Session is not recording")
         active_result = await db.execute(
@@ -109,6 +114,7 @@ async def create_flow(session_id: str, body: FlowCreate):
 @router.get("", response_model=list[FlowResponse])
 async def list_flows(session_id: str):
     async with get_session() as db:
+        await _get_active_session(db, session_id)
         result = await db.execute(
             select(Flow).where(Flow.session_id == session_id).order_by(Flow.order)
         )
@@ -118,6 +124,7 @@ async def list_flows(session_id: str):
 @router.get("/{flow_id}/requests", response_model=list[RequestResponse])
 async def list_flow_requests(session_id: str, flow_id: str):
     async with get_session() as db:
+        await _get_active_session(db, session_id)
         flow = await db.get(Flow, flow_id)
         if not flow or flow.session_id != session_id:
             raise HTTPException(status_code=404, detail="Flow not found")
@@ -133,6 +140,7 @@ async def list_flow_requests(session_id: str, flow_id: str):
 @router.post("/{flow_id}/stop", response_model=FlowResponse)
 async def stop_flow(session_id: str, flow_id: str):
     async with get_session() as db:
+        await _get_active_session(db, session_id)
         flow = await db.get(Flow, flow_id)
         if not flow or flow.session_id != session_id:
             raise HTTPException(status_code=404, detail="Flow not found")
@@ -153,6 +161,7 @@ async def stop_flow(session_id: str, flow_id: str):
 @router.delete("/{flow_id}", status_code=204)
 async def delete_flow(session_id: str, flow_id: str):
     async with get_session() as db:
+        await _get_active_session(db, session_id)
         flow = await db.get(Flow, flow_id)
         if not flow or flow.session_id != session_id:
             raise HTTPException(status_code=404, detail="Flow not found")
@@ -172,6 +181,7 @@ async def reveal_raw_payload(session_id: str, request_id: str, body: RevealReque
     if not reason:
         raise HTTPException(status_code=400, detail="Reveal reason is required")
     async with get_session() as db:
+        await _get_active_session(db, session_id)
         result = await db.execute(
             select(CapturedRequest, EncryptedPayload)
             .join(Flow, CapturedRequest.flow_id == Flow.id)

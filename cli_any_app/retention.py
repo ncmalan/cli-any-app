@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 
 from cli_any_app.audit import record_audit_event
 from cli_any_app.models.database import get_session
@@ -20,12 +20,25 @@ async def purge_expired_sessions(now: datetime | None = None, *, limit: int | No
     now = now or datetime.now(timezone.utc)
     purged: list[str] = []
     async with get_session() as db:
-        result = await db.execute(select(Session).order_by(Session.created_at))
+        retention_days = case(
+            (Session.retention_days > 0, Session.retention_days),
+            else_=0,
+        )
+        expires_at = func.julianday(Session.created_at) + retention_days
+        query = (
+            select(Session)
+            .where(
+                Session.created_at <= now,
+                expires_at <= func.julianday(now),
+            )
+            .order_by(Session.created_at)
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        result = await db.execute(query)
         for session in result.scalars():
             retention_days = max(session.retention_days or 0, 0)
             expires_at = _as_utc(session.created_at) + timedelta(days=retention_days)
-            if expires_at > now:
-                continue
             await record_audit_event(
                 db,
                 "session.purged",
@@ -39,7 +52,5 @@ async def purge_expired_sessions(now: datetime | None = None, *, limit: int | No
             )
             purged.append(session.id)
             await db.delete(session)
-            if limit is not None and len(purged) >= limit:
-                break
         await db.commit()
     return {"purged": len(purged), "session_ids": purged}

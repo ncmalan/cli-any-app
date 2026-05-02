@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 
 from cli_any_app.audit import record_audit_event
-from cli_any_app.capture.filters import extract_domain, normalize_domain
+from cli_any_app.capture.filters import normalize_domain
 from cli_any_app.capture.noise_domains import matches_noise_pattern
 from cli_any_app.models.database import get_session
 from cli_any_app.models.domain_filter import DomainFilter
@@ -73,25 +73,48 @@ def _domain_request_filter(domain: str):
     return or_(*(host_clauses + url_clauses))
 
 
+def _domain_candidate_expr():
+    after_scheme = case(
+        (
+            func.instr(CapturedRequest.url, "://") > 0,
+            func.substr(CapturedRequest.url, func.instr(CapturedRequest.url, "://") + 3),
+        ),
+        else_=CapturedRequest.url,
+    )
+    slash_pos = func.instr(after_scheme, "/")
+    before_path = case(
+        (slash_pos > 0, func.substr(after_scheme, 1, slash_pos - 1)),
+        else_=after_scheme,
+    )
+    query_pos = func.instr(before_path, "?")
+    url_host = case(
+        (query_pos > 0, func.substr(before_path, 1, query_pos - 1)),
+        else_=before_path,
+    )
+    return func.lower(func.coalesce(func.nullif(CapturedRequest.host, ""), url_host))
+
+
 @router.get("", response_model=list[DomainInfo])
 async def list_domains(session_id: str):
     async with get_session() as db:
         session = await db.get(Session, session_id)
         if not session or session.status == "deleted":
             raise HTTPException(status_code=404, detail="Session not found")
+        domain_candidate = _domain_candidate_expr()
         result = await db.execute(
-            select(CapturedRequest.url, CapturedRequest.host)
+            select(domain_candidate, func.count(CapturedRequest.id))
             .join(Flow)
             .where(Flow.session_id == session_id)
+            .group_by(domain_candidate)
         )
         rows = result.all()
         filters = await load_domain_enabled_map(db, session_id)
 
     domain_counts: dict[str, int] = {}
-    for url, host in rows:
-        d = normalize_domain(host or extract_domain(url))
+    for domain_candidate, count in rows:
+        d = normalize_domain(domain_candidate)
         if d:
-            domain_counts[d] = domain_counts.get(d, 0) + 1
+            domain_counts[d] = domain_counts.get(d, 0) + int(count)
 
     domains = []
     for domain, count in sorted(domain_counts.items(), key=lambda x: -x[1]):
@@ -140,7 +163,6 @@ async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
                 source="user",
             )
             db.add(existing)
-        _domain_filters.setdefault(session_id, {})[domain] = body.enabled
         await record_audit_event(
             db,
             "domain_filter.changed",

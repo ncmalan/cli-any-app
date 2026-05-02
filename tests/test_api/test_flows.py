@@ -83,6 +83,59 @@ async def test_delete_flow_not_found(client, session_id):
     assert resp.status_code == 404
 
 
+async def test_deleted_session_rejects_flow_mutations_and_raw_reveal(client, session_id):
+    create = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
+    flow_id = create.json()["id"]
+
+    from cli_any_app.capture.privacy import encrypt_payload
+    from cli_any_app.models.database import get_session
+    from cli_any_app.models.encrypted_payload import EncryptedPayload
+    from cli_any_app.models.request import CapturedRequest
+
+    async with get_session() as db:
+        request = CapturedRequest(
+            flow_id=flow_id,
+            method="GET",
+            url="https://api.example.com/items",
+            status_code=200,
+            request_headers="{}",
+            response_headers="{}",
+            content_type="application/json",
+        )
+        db.add(request)
+        await db.flush()
+        db.add(
+            EncryptedPayload(
+                request_id=request.id,
+                request_body_ciphertext=encrypt_payload('{"ok":true}'),
+                response_body_ciphertext=encrypt_payload('{"done":true}'),
+            )
+        )
+        await db.commit()
+        request_id = request.id
+
+    deleted = await client.delete(f"/api/sessions/{session_id}")
+    assert deleted.status_code == 204
+
+    list_flows = await client.get(f"/api/sessions/{session_id}/flows")
+    assert list_flows.status_code == 404
+
+    list_requests = await client.get(f"/api/sessions/{session_id}/flows/{flow_id}/requests")
+    assert list_requests.status_code == 404
+
+    stopped = await client.post(f"/api/sessions/{session_id}/flows/{flow_id}/stop")
+    assert stopped.status_code == 404
+
+    removed = await client.delete(f"/api/sessions/{session_id}/flows/{flow_id}")
+    assert removed.status_code == 404
+
+    revealed = await client.post(
+        f"/api/sessions/{session_id}/flows/requests/{request_id}/reveal",
+        json={"reason": "deleted session check"},
+    )
+    assert revealed.status_code == 404
+
+
 async def test_list_flow_requests(client, session_id):
     create = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
     flow_id = create.json()["id"]
