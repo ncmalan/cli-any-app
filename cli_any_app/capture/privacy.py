@@ -183,16 +183,20 @@ def redact_headers(headers: dict[str, Any]) -> dict[str, Any]:
     return redacted
 
 
-def redact_url(url: str) -> tuple[str, str, str]:
-    parsed = urlsplit(url)
+def redact_query_string(query: str) -> str:
     safe_pairs = []
-    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+    for key, value in parse_qsl(query, keep_blank_values=True):
         lowered = key.lower()
         if lowered in SENSITIVE_QUERY_KEYS or "token" in lowered or "secret" in lowered:
             safe_pairs.append((key, REDACTED))
         else:
             safe_pairs.append((key, redact_string(value)))
-    redacted_query = urlencode(safe_pairs, doseq=True)
+    return urlencode(safe_pairs, doseq=True)
+
+
+def redact_url(url: str) -> tuple[str, str, str]:
+    parsed = urlsplit(url)
+    redacted_query = redact_query_string(parsed.query)
     safe_path = quote(redact_string(unquote(parsed.path or "/")), safe="/:<>")
     redacted_path = urlunsplit(("", "", safe_path, redacted_query, ""))
     safe_host = parsed.hostname or ""

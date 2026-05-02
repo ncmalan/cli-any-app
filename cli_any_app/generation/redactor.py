@@ -4,16 +4,17 @@ import copy
 import json
 import re
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from cli_any_app.capture.privacy import (
     REDACTED,
     REDACTED_TOKEN,
-    SENSITIVE_BODY_KEYS,
-    SENSITIVE_HEADER_KEYS,
-    SENSITIVE_QUERY_KEYS,
     PHI_PATTERNS,
-    stable_placeholder,
+    redact_headers as _redact_headers,
+    redact_key_value as _redact_key_value,
+    redact_query_string,
+    redact_string as _redact_string,
+    redact_url as _redact_capture_url,
+    redact_value as _redact_value,
 )
 
 REDACTED_PLACEHOLDER = re.compile(r"<[A-Z_]+:[0-9a-f]{10}>")
@@ -37,69 +38,26 @@ def redact_sensitive_data(data: dict) -> dict:
 
 
 def redact_headers(headers: dict[str, Any]) -> dict[str, Any]:
-    redacted: dict[str, Any] = {}
-    for key, value in headers.items():
-        lowered = key.lower()
-        if lowered in SENSITIVE_HEADER_KEYS or "token" in lowered or "secret" in lowered:
-            if isinstance(value, str) and value.lower().startswith("bearer "):
-                redacted[key] = f"Bearer {REDACTED}"
-            else:
-                redacted[key] = REDACTED
-        else:
-            redacted[key] = redact_value(value)
-    return redacted
+    return _redact_headers(headers)
 
 
 def redact_value(value: Any, key: str | None = None) -> Any:
-    if key:
-        lowered = key.lower()
-        if lowered in SENSITIVE_BODY_KEYS or "token" in lowered or "secret" in lowered:
-            return REDACTED_TOKEN if "token" in lowered else REDACTED
-    if isinstance(value, dict):
-        return {child_key: redact_value(child_value, child_key) for child_key, child_value in value.items()}
-    if isinstance(value, list):
-        return [redact_value(item) for item in value]
-    if isinstance(value, str):
-        return redact_string(value)
-    return value
+    if key is not None:
+        return _redact_key_value(key, value)
+    return _redact_value(value)
 
 
 def redact_string(value: str) -> str:
-    redacted = value
-    for pattern, label in PHI_PATTERNS:
-        name = label.strip("<>")
-        redacted = pattern.sub(lambda match: stable_placeholder(name, match.group(0)), redacted)
-    return redacted
+    return _redact_string(value)
 
 
 def redact_url(url: str) -> str:
-    parsed = urlsplit(url)
-    query = redact_query(parsed.query)
-    return urlunsplit((parsed.scheme, _safe_netloc(parsed), redact_string(parsed.path), query, ""))
-
-
-def _safe_netloc(parsed) -> str:
-    host = parsed.hostname or ""
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    try:
-        port = parsed.port
-    except ValueError:
-        port = None
-    if port is not None:
-        return f"{host}:{port}"
-    return host
+    _host, _path, redacted_url = _redact_capture_url(url)
+    return redacted_url
 
 
 def redact_query(query: str) -> str:
-    pairs = []
-    for key, value in parse_qsl(query, keep_blank_values=True):
-        lowered = key.lower()
-        if lowered in SENSITIVE_QUERY_KEYS or "token" in lowered or "secret" in lowered:
-            pairs.append((key, REDACTED))
-        else:
-            pairs.append((key, redact_string(value)))
-    return urlencode(pairs, doseq=True)
+    return redact_query_string(query)
 
 
 def has_unredacted_sensitive_data(data: dict) -> bool:

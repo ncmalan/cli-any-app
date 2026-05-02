@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select
 
 from cli_any_app.audit import record_audit_event
-from cli_any_app.capture.filters import normalize_domain
+from cli_any_app.capture.filters import extract_domain, normalize_domain
 from cli_any_app.capture.noise_domains import matches_noise_pattern
 from cli_any_app.models.database import get_session
 from cli_any_app.models.domain_filter import DomainFilter
@@ -64,25 +64,8 @@ def _domain_request_filter(domain: str):
     return or_(*(host_clauses + url_clauses))
 
 
-def _domain_candidate_expr():
-    after_scheme = case(
-        (
-            func.instr(CapturedRequest.url, "://") > 0,
-            func.substr(CapturedRequest.url, func.instr(CapturedRequest.url, "://") + 3),
-        ),
-        else_=CapturedRequest.url,
-    )
-    slash_pos = func.instr(after_scheme, "/")
-    before_path = case(
-        (slash_pos > 0, func.substr(after_scheme, 1, slash_pos - 1)),
-        else_=after_scheme,
-    )
-    query_pos = func.instr(before_path, "?")
-    url_host = case(
-        (query_pos > 0, func.substr(before_path, 1, query_pos - 1)),
-        else_=before_path,
-    )
-    return func.lower(func.coalesce(func.nullif(CapturedRequest.host, ""), url_host))
+def _domain_candidate(host: str | None, url: str) -> str:
+    return normalize_domain(host or "") or extract_domain(url)
 
 
 @router.get("", response_model=list[DomainInfo])
@@ -91,28 +74,22 @@ async def list_domains(session_id: str):
         session = await db.get(Session, session_id)
         if not session or session.status == "deleted":
             raise HTTPException(status_code=404, detail="Session not found")
-        domain_candidate = _domain_candidate_expr()
-        api_count = func.coalesce(
-            func.sum(case((CapturedRequest.is_api.is_(True), 1), else_=0)),
-            0,
-        )
         result = await db.execute(
-            select(domain_candidate, func.count(CapturedRequest.id), api_count)
+            select(CapturedRequest.host, CapturedRequest.url, CapturedRequest.is_api)
             .join(Flow)
             .where(Flow.session_id == session_id)
-            .group_by(domain_candidate)
         )
         rows = result.all()
         filters = await load_domain_enabled_map(db, session_id)
 
     domain_counts: dict[str, tuple[int, int]] = {}
-    for domain_candidate, count, api_request_count in rows:
-        d = normalize_domain(domain_candidate)
+    for host, url, is_api in rows:
+        d = _domain_candidate(host, url)
         if d:
             total_count, total_api_count = domain_counts.get(d, (0, 0))
             domain_counts[d] = (
-                total_count + int(count),
-                total_api_count + int(api_request_count or 0),
+                total_count + 1,
+                total_api_count + int(bool(is_api)),
             )
 
     domains = []

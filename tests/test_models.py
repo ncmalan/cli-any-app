@@ -11,6 +11,34 @@ from cli_any_app.models.flow import Flow
 from cli_any_app.models.request import CapturedRequest
 
 
+def test_orm_nullability_matches_baseline_migration_contract():
+    session_columns = Session.__table__.c
+    for column_name in [
+        "status",
+        "proxy_port",
+        "captured_bytes",
+        "retention_days",
+        "created_at",
+        "updated_at",
+    ]:
+        assert session_columns[column_name].nullable is False
+
+    request_columns = CapturedRequest.__table__.c
+    for column_name in [
+        "timestamp",
+        "host",
+        "redacted_path",
+        "request_headers",
+        "request_body_size",
+        "response_headers",
+        "response_body_size",
+        "content_type",
+        "is_api",
+        "redaction_status",
+    ]:
+        assert request_columns[column_name].nullable is False
+
+
 @pytest.fixture(autouse=True)
 async def setup_db(tmp_path):
     await init_db(f"sqlite+aiosqlite:///{tmp_path}/test.db")

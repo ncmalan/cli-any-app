@@ -24,24 +24,28 @@ class CapturedRequest(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     flow_id: Mapped[str] = mapped_column(ForeignKey("flows.id"), nullable=False)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc)
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     method: Mapped[str] = mapped_column(String, nullable=False)
     url: Mapped[str] = mapped_column(String, nullable=False)
-    host: Mapped[str] = mapped_column(String, default="")
-    redacted_path: Mapped[str] = mapped_column(Text, default="")
-    request_headers: Mapped[str] = mapped_column(Text, default="{}")
+    host: Mapped[str] = mapped_column(String, nullable=False, default="")
+    redacted_path: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    request_headers: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     request_body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    request_body_size: Mapped[int] = mapped_column(Integer, default=0)
+    request_body_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     request_body_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     status_code: Mapped[int] = mapped_column(Integer, nullable=False)
-    response_headers: Mapped[str] = mapped_column(Text, default="{}")
+    response_headers: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     response_body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    response_body_size: Mapped[int] = mapped_column(Integer, default=0)
+    response_body_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     response_body_hash: Mapped[str | None] = mapped_column(String, nullable=True)
-    content_type: Mapped[str] = mapped_column(String, default="")
-    is_api: Mapped[bool] = mapped_column(Boolean, default=True)
-    redaction_status: Mapped[str] = mapped_column(String, default="metadata_only")
+    content_type: Mapped[str] = mapped_column(String, nullable=False, default="")
+    is_api: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    redaction_status: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="metadata_only",
+    )
 
     flow: Mapped["Flow"] = relationship(back_populates="requests")
     encrypted_payload: Mapped["EncryptedPayload | None"] = relationship(

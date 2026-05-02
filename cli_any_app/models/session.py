@@ -28,17 +28,20 @@ class Session(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, nullable=False)
     app_name: Mapped[str] = mapped_column(String, nullable=False)
-    status: Mapped[str] = mapped_column(String, default="created")
-    proxy_port: Mapped[int] = mapped_column(Integer, default=8080)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="created")
+    proxy_port: Mapped[int] = mapped_column(Integer, nullable=False, default=8080)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     capture_token_hash: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     captured_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    retention_days: Mapped[int] = mapped_column(Integer, default=30)
+    retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc)
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
