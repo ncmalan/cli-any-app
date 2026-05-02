@@ -82,7 +82,7 @@ describe('SessionReview safety defaults', () => {
     expect(results.violations).toHaveLength(0)
   })
 
-  it('preserves selected request count when toggling a domain', async () => {
+  it('uses zero request count returned by a domain toggle', async () => {
     server.use(
       http.get('/api/sessions/s1', () => HttpResponse.json(stoppedSession)),
       http.get('/api/sessions/s1/flows', () => HttpResponse.json([
@@ -96,25 +96,26 @@ describe('SessionReview safety defaults', () => {
         },
       ])),
       http.get('/api/sessions/s1/domains', () => HttpResponse.json([
-        { domain: 'api.example.test', request_count: 3, is_noise: false, enabled: true },
+        { domain: 'api.example.test', request_count: 3, is_noise: false, enabled: false },
       ])),
       http.get('/api/settings', () => HttpResponse.json({ has_key: true })),
       http.put('/api/sessions/s1/domains/api.example.test', () => HttpResponse.json({
         domain: 'api.example.test',
         request_count: 0,
         is_noise: false,
-        enabled: false,
+        enabled: true,
       })),
     )
 
     renderReview()
 
     const selectedRequestsLabel = await screen.findByText('Selected requests')
-    expect(selectedRequestsLabel.nextElementSibling).toHaveTextContent('3')
-    await userEvent.click(screen.getByRole('switch', { name: /disable api\.example\.test/i }))
+    expect(selectedRequestsLabel.nextElementSibling).toHaveTextContent('0')
+    expect(screen.getByText('3 req')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('switch', { name: /enable api\.example\.test/i }))
 
     await waitFor(() => expect(selectedRequestsLabel.nextElementSibling).toHaveTextContent('0'))
-    expect(screen.getByText('3 req')).toBeInTheDocument()
-    expect(screen.getByRole('switch', { name: /enable api\.example\.test/i })).toBeInTheDocument()
+    expect(screen.getByText('0 req')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: /disable api\.example\.test/i })).toBeInTheDocument()
   })
 })

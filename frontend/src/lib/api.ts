@@ -1,11 +1,14 @@
 const BASE = '/api'
 
+let activeCsrfToken = ''
+
 function csrfToken(): string {
-  const match = document.cookie
-    .split(';')
-    .map(row => row.trim())
-    .find(row => row.startsWith('cli_any_app_csrf='))
-  return match ? decodeURIComponent(match.split('=')[1]) : ''
+  return activeCsrfToken
+}
+
+function rememberCsrfToken<T extends { csrf_token?: string | null }>(status: T): T {
+  activeCsrfToken = status.csrf_token ?? ''
+  return status
 }
 
 async function safeError(res: Response): Promise<Error> {
@@ -23,7 +26,8 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
   const headers = new Headers(init?.headers)
   headers.set('Content-Type', 'application/json')
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    headers.set('X-CSRF-Token', csrfToken())
+    const token = csrfToken()
+    if (token) headers.set('X-CSRF-Token', token)
   }
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -117,15 +121,18 @@ export interface GenerationStatus {
 
 // Auth
 export async function login(password: string): Promise<AuthStatus> {
-  return fetchJson('/auth/login', { method: 'POST', body: JSON.stringify({ password }) })
+  const status = await fetchJson<AuthStatus>('/auth/login', { method: 'POST', body: JSON.stringify({ password }) })
+  return rememberCsrfToken(status)
 }
 
 export async function logout(): Promise<AuthStatus> {
-  return fetchJson('/auth/logout', { method: 'POST' })
+  const status = await fetchJson<AuthStatus>('/auth/logout', { method: 'POST' })
+  return rememberCsrfToken(status)
 }
 
 export async function getMe(): Promise<AuthStatus> {
-  return fetchJson('/auth/me')
+  const status = await fetchJson<AuthStatus>('/auth/me')
+  return rememberCsrfToken(status)
 }
 
 export async function getWsToken(): Promise<string> {

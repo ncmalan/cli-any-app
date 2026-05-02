@@ -1,33 +1,35 @@
-import { http, HttpResponse } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
-import { createSession } from './api'
+import { HttpResponse, http } from 'msw'
+import { describe, expect, it } from 'vitest'
+import { createSession, login } from './api'
 import { server } from '../test/server'
 
 describe('API client CSRF handling', () => {
-  it('reads CSRF cookies even when cookie segments have no spaces', async () => {
-    const cookieGetter = vi
-      .spyOn(document, 'cookie', 'get')
-      .mockReturnValue('other=value;cli_any_app_csrf=csrf-token')
+  it('sends the server-issued CSRF token on state-changing requests', async () => {
+    let csrfHeader: string | null = null
 
-    let csrfHeader = ''
     server.use(
+      http.post('/api/auth/login', () => HttpResponse.json({
+        authenticated: true,
+        username: 'local-admin',
+        csrf_token: 'server-issued-csrf',
+      })),
       http.post('/api/sessions', ({ request }) => {
-        csrfHeader = request.headers.get('x-csrf-token') ?? ''
+        csrfHeader = request.headers.get('x-csrf-token')
         return HttpResponse.json({
           id: 's1',
-          name: 'Trace',
+          name: 'Review',
           app_name: 'Care App',
           status: 'created',
-          proxy_port: 0,
+          proxy_port: 8899,
           error_message: null,
           created_at: '2026-05-01T00:00:00Z',
-        }, { status: 201 })
+        })
       }),
     )
 
-    await createSession('Trace', 'Care App')
+    await login('test-password')
+    await createSession('Review', 'Care App')
 
-    expect(csrfHeader).toBe('csrf-token')
-    cookieGetter.mockRestore()
+    expect(csrfHeader).toBe('server-issued-csrf')
   })
 })

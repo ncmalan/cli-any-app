@@ -124,7 +124,7 @@ export default function SessionReview() {
       const updated = await toggleDomain(id, domain, enabled)
       setDomains(prev => prev.map(d => (
         d.domain === updated.domain
-          ? { ...updated, request_count: updated.request_count || d.request_count }
+          ? { ...updated, request_count: updated.request_count ?? d.request_count }
           : d
       )))
     } catch {
