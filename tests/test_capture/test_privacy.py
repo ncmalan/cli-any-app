@@ -1,6 +1,6 @@
 import hashlib
 
-from cli_any_app.capture.privacy import body_hash, stable_placeholder
+from cli_any_app.capture.privacy import body_hash, has_sensitive_plaintext, stable_placeholder
 
 
 def test_stable_placeholder_uses_keyed_digest():
@@ -25,3 +25,23 @@ def test_body_hash_uses_keyed_digest():
     assert first == second
     assert first != unkeyed_digest
     assert body_hash(None) is None
+
+
+def test_sensitive_plaintext_ignores_redaction_placeholders():
+    value = {
+        "patient_id": "<PATIENT_ID:1234567890>",
+        "date": "<DATE:abcdef1234>",
+        "email": "<EMAIL:abcdef1234>",
+        "masked": "<REDACTED>",
+    }
+
+    assert has_sensitive_plaintext(value) is False
+
+
+def test_sensitive_plaintext_detects_real_phi_with_redaction_markers():
+    value = {
+        "masked": "<REDACTED>",
+        "patient_id": "patient_id=ABC12345",
+    }
+
+    assert has_sensitive_plaintext(value) is True

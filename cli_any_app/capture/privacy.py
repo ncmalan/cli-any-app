@@ -17,6 +17,7 @@ from cli_any_app.security import get_app_secret
 
 REDACTED = "<REDACTED>"
 REDACTED_TOKEN = "<REDACTED_TOKEN>"
+REDACTED_PLACEHOLDER = re.compile(r"<[A-Z_]+:[0-9a-f]{10}>")
 
 SENSITIVE_HEADER_KEYS = {
     "authorization",
@@ -249,8 +250,8 @@ def has_sensitive_plaintext(value: Any) -> bool:
     if value is None:
         return False
     text = json.dumps(value, default=str) if not isinstance(value, str) else value
-    if REDACTED in text or "<EMAIL:" in text or "<PHONE:" in text:
-        return False
+    text = REDACTED_PLACEHOLDER.sub("", text)
+    text = text.replace(REDACTED_TOKEN, "").replace(REDACTED, "")
     return any(pattern.search(text) for pattern, _ in PHI_PATTERNS)
 
 
