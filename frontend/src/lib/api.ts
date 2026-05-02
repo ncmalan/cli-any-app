@@ -6,6 +6,10 @@ function csrfToken(): string {
   return activeCsrfToken
 }
 
+export function clearCsrfToken(): void {
+  activeCsrfToken = ''
+}
+
 function rememberCsrfToken<T extends { csrf_token?: string | null }>(status: T): T {
   activeCsrfToken = status.csrf_token ?? ''
   return status
@@ -34,6 +38,7 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     credentials: 'same-origin',
     headers,
   })
+  if (res.status === 401) clearCsrfToken()
   if (!res.ok) throw await safeError(res)
   if (res.status === 204) return undefined as T
   return res.json()
@@ -126,8 +131,12 @@ export async function login(password: string): Promise<AuthStatus> {
 }
 
 export async function logout(): Promise<AuthStatus> {
-  const status = await fetchJson<AuthStatus>('/auth/logout', { method: 'POST' })
-  return rememberCsrfToken(status)
+  try {
+    const status = await fetchJson<AuthStatus>('/auth/logout', { method: 'POST' })
+    return rememberCsrfToken(status)
+  } finally {
+    clearCsrfToken()
+  }
 }
 
 export async function getMe(): Promise<AuthStatus> {

@@ -178,8 +178,10 @@ async def generate_cli_package(api_spec: dict, output_dir: Path, on_progress=Non
             raise ValueError(f"Generated output may not overwrite trusted template file: {filepath}")
         if out_file.exists():
             raise ValueError(f"Generated output may not overwrite existing file: {filepath}")
+        if not isinstance(content, str):
+            raise ValueError(f"Generated file content must be a string: {filepath}")
         out_file.parent.mkdir(parents=True, exist_ok=True)
-        out_file.write_text(str(content))
+        out_file.write_text(content)
         if on_progress:
             await on_progress("generating", f"Wrote {filepath}")
 

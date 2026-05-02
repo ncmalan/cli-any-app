@@ -202,3 +202,22 @@ async def test_generate_rejects_model_overwrite_of_template_file(
 
         with pytest.raises(ValueError, match="trusted template file"):
             await generate_cli_package(api_spec, tmp_path)
+
+
+async def test_generate_rejects_non_string_file_content(
+    tmp_path, api_spec, generated_files
+):
+    """Model output must provide string file contents."""
+    invalid_files = {
+        **generated_files,
+        "test_app/cli.py": {"not": "source"},
+    }
+
+    with patch(
+        "cli_any_app.generation.generator.get_client"
+    ) as mock_get_client:
+        mock_client = _make_mock_client(invalid_files)
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(ValueError, match="Generated file content must be a string"):
+            await generate_cli_package(api_spec, tmp_path)

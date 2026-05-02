@@ -16,9 +16,11 @@ export default function Login({ onAuthenticated }: LoginProps) {
     setError('')
     try {
       await login(password)
+      setPassword('')
       onAuthenticated()
     } catch {
       setError('Authentication failed')
+    } finally {
       setSubmitting(false)
     }
   }
