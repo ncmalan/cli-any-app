@@ -87,6 +87,58 @@ name = "test"
     assert "Build dependency not allowed: evil-builder" in result["errors"]
 
 
+def test_rejects_executable_build_hook_files(tmp_path):
+    pkg = tmp_path / "test-app"
+    pkg.mkdir()
+    (pkg / "pyproject.toml").write_text(
+        """
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "test"
+""".strip()
+    )
+    (pkg / "setup.py").write_text("raise RuntimeError('build hook executed')\n")
+    (pkg / "SKILL.md").write_text("# Test\n")
+    pkg_dir = pkg / "test_app"
+    pkg_dir.mkdir()
+    (pkg_dir / "cli.py").write_text("import click\n\n@click.group()\ndef cli(): pass\n")
+    (pkg_dir / "__init__.py").write_text("")
+
+    result = validate_generated_cli(pkg)
+
+    assert result["valid"] is False
+    assert "Executable build hook not allowed: setup.py" in result["errors"]
+
+
+def test_rejects_local_build_backend_path(tmp_path):
+    pkg = tmp_path / "test-app"
+    pkg.mkdir()
+    (pkg / "pyproject.toml").write_text(
+        """
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+backend-path = ["."]
+
+[project]
+name = "test"
+""".strip()
+    )
+    (pkg / "SKILL.md").write_text("# Test\n")
+    pkg_dir = pkg / "test_app"
+    pkg_dir.mkdir()
+    (pkg_dir / "cli.py").write_text("import click\n\n@click.group()\ndef cli(): pass\n")
+    (pkg_dir / "__init__.py").write_text("")
+
+    result = validate_generated_cli(pkg)
+
+    assert result["valid"] is False
+    assert "Build backend path not allowed" in result["errors"]
+
+
 def test_smoke_install_uses_restricted_pip_flags(tmp_path, monkeypatch):
     pkg = tmp_path / "test-app"
     pkg.mkdir()

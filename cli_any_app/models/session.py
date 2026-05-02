@@ -32,6 +32,7 @@ class Session(Base):
     proxy_port: Mapped[int] = mapped_column(Integer, default=8080)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     capture_token_hash: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
+    captured_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     retention_days: Mapped[int] = mapped_column(Integer, default=30)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)

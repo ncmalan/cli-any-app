@@ -11,6 +11,7 @@ from pathlib import Path
 ALLOWED_DEPENDENCIES = {"click", "httpx"}
 ALLOWED_BUILD_BACKENDS = {"setuptools.build_meta"}
 ALLOWED_BUILD_DEPENDENCIES = {"setuptools", "wheel"}
+UNSAFE_BUILD_HOOK_FILES = {"setup.py"}
 UNSAFE_IMPORTS = {"subprocess", "socket", "ftplib", "telnetlib", "pickle", "marshal"}
 UNSAFE_CALLS = {"eval", "exec", "compile", "__import__"}
 SAFE_PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -32,6 +33,8 @@ def validate_generated_cli(package_dir: Path, *, run_smoke: bool = False) -> dic
     for f in required:
         if not (package_dir / f).exists():
             errors.append(f"Missing required file: {f}")
+
+    _validate_generated_build_hooks(package_dir, errors)
 
     pyproject = package_dir / "pyproject.toml"
     if pyproject.exists():
@@ -100,12 +103,21 @@ def _check_ast_safety(tree: ast.AST, rel_path: Path, errors: list[str]) -> None:
                     errors.append(f"Unsafe call in {rel_path}: os.system")
 
 
+def _validate_generated_build_hooks(package_dir: Path, errors: list[str]) -> None:
+    for hook_file in sorted(package_dir.rglob("*")):
+        if hook_file.is_file() and hook_file.name in UNSAFE_BUILD_HOOK_FILES:
+            errors.append(f"Executable build hook not allowed: {hook_file.relative_to(package_dir)}")
+
+
 def _validate_build_system(metadata: dict, errors: list[str], *, required: bool = False) -> None:
     build_system = metadata.get("build-system")
     if not build_system:
         if required:
             errors.append("Smoke test requires an explicit build-system")
         return
+
+    if build_system.get("backend-path"):
+        errors.append("Build backend path not allowed")
 
     backend = build_system.get("build-backend", "")
     if backend not in ALLOWED_BUILD_BACKENDS:

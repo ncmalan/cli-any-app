@@ -357,6 +357,10 @@ async def test_capture_enforces_cumulative_session_size_limit(client, monkeypatc
     )
     assert ok.status_code == 202
 
+    async with get_session() as db:
+        stored_session = await db.get(Session, session_id)
+        assert stored_session.captured_bytes == 4
+
     oversized = await client.post(
         "/api/internal/capture",
         json=payload,
@@ -412,6 +416,10 @@ async def test_capture_session_size_limit_counts_encrypted_raw_payloads(client, 
         headers={"X-Capture-Token": "good-token"},
     )
     assert ok.status_code == 202
+
+    async with get_session() as db:
+        stored_session = await db.get(Session, session_id)
+        assert stored_session.captured_bytes == 106
 
     oversized = await client.post(
         "/api/internal/capture",

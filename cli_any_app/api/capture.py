@@ -2,7 +2,7 @@ import json
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import LargeBinary, cast, func, select
+from sqlalchemy import select, update
 
 from cli_any_app.capture.filters import is_api_request, extract_domain
 from cli_any_app.capture.privacy import (
@@ -101,10 +101,6 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
 
             if not proxy_manager.owns_session(payload.session_id):
                 raise HTTPException(status_code=403, detail="Active proxy does not own session")
-        if settings.max_session_capture_bytes > 0:
-            existing_bytes = await _session_capture_bytes(db, payload.session_id)
-            if existing_bytes + incoming_capture_bytes > settings.max_session_capture_bytes:
-                raise HTTPException(status_code=413, detail="Session capture size limit exceeded")
         result = await db.execute(
             select(Flow)
             .where(Flow.session_id == payload.session_id, Flow.ended_at.is_(None))
@@ -114,6 +110,9 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
         flow = result.scalar_one_or_none()
         if not flow:
             return {"status": "no_active_flow"}
+
+        await _reserve_session_capture_bytes(db, payload.session_id, incoming_capture_bytes)
+
         req = CapturedRequest(
             flow_id=flow.id,
             method=payload.method,
@@ -159,23 +158,19 @@ async def receive_capture(payload: CapturePayload, x_capture_token: str | None =
     return {"status": "captured", "is_api": api_flag, "domain": domain}
 
 
-async def _session_capture_bytes(db, session_id: str) -> int:
-    def stored_text_bytes(column):
-        return func.coalesce(func.length(cast(column, LargeBinary)), 0)
+async def _reserve_session_capture_bytes(db, session_id: str, incoming_capture_bytes: int) -> None:
+    if incoming_capture_bytes <= 0:
+        return
 
-    request_bytes = (
-        stored_text_bytes(CapturedRequest.request_body)
-        + stored_text_bytes(CapturedRequest.response_body)
-        + stored_text_bytes(CapturedRequest.request_headers)
-        + stored_text_bytes(CapturedRequest.response_headers)
-        + stored_text_bytes(EncryptedPayload.request_body_ciphertext)
-        + stored_text_bytes(EncryptedPayload.response_body_ciphertext)
-    )
+    stmt = update(Session).where(Session.id == session_id)
+    if settings.max_session_capture_bytes > 0:
+        stmt = stmt.where(
+            Session.captured_bytes + incoming_capture_bytes <= settings.max_session_capture_bytes
+        )
+    stmt = stmt.values(captured_bytes=Session.captured_bytes + incoming_capture_bytes)
+
     result = await db.execute(
-        select(func.coalesce(func.sum(request_bytes), 0))
-        .select_from(CapturedRequest)
-        .join(Flow, CapturedRequest.flow_id == Flow.id)
-        .outerjoin(EncryptedPayload, EncryptedPayload.request_id == CapturedRequest.id)
-        .where(Flow.session_id == session_id)
+        stmt.execution_options(synchronize_session=False)
     )
-    return int(result.scalar_one() or 0)
+    if result.rowcount != 1:
+        raise HTTPException(status_code=413, detail="Session capture size limit exceeded")

@@ -24,6 +24,7 @@ def upgrade() -> None:
         sa.Column("proxy_port", sa.Integer(), nullable=False),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("capture_token_hash", sa.String(), nullable=True),
+        sa.Column("captured_bytes", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("retention_days", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
