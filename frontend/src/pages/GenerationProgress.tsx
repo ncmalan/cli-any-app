@@ -177,12 +177,21 @@ export default function GenerationProgress() {
 
   const currentStep = session ? stepIndex(session.status, activeStep) : activeStep
   const isComplete = session?.status === 'complete'
-  const isError = ['error', 'validation_failed', 'needs_review'].includes(session?.status ?? '')
+  const isPipelineError = session?.status === 'error'
+  const isReviewNeeded = ['validation_failed', 'needs_review'].includes(session?.status ?? '')
+  const isError = isPipelineError || isReviewNeeded
   const isApproved = latestAttempt?.approval_status === 'approved'
   const isApprovalPending = isComplete && latestAttempt?.approval_status === 'pending'
   const isRejected = isComplete && latestAttempt?.approval_status === 'rejected'
   const installPackagePath = latestAttempt?.package_path || 'data/generated/...'
   const installCliName = latestAttempt?.cli_name || 'generated-cli'
+  const statusHeading = isComplete
+    ? 'Generation Complete'
+    : isPipelineError
+      ? 'Generation Failed'
+      : isReviewNeeded
+        ? 'Generation Needs Review'
+        : 'Generating CLI...'
 
   async function handleApprove() {
     if (!id || !latestAttempt || !approvalReason.trim()) return
@@ -205,7 +214,7 @@ export default function GenerationProgress() {
         &larr; Back to Dashboard
       </Link>
       <h1 className="text-3xl font-bold mt-4 mb-2">
-        {isComplete ? 'Generation Complete' : isError ? 'Generation Needs Review' : 'Generating CLI...'}
+        {statusHeading}
       </h1>
       {session && (
         <p className="text-gray-400 mb-8">{session.name} &middot; {session.app_name}</p>
@@ -364,7 +373,9 @@ ${installCliName} --help`}
             <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <h2 className="text-lg font-semibold text-red-400">Generation Failed</h2>
+            <h2 className="text-lg font-semibold text-red-400">
+              {isPipelineError ? 'Generation Failed' : 'Generation Needs Review'}
+            </h2>
           </div>
           {session?.error_message ? (
             <pre className="text-sm text-red-300 bg-red-950/50 p-3 rounded overflow-x-auto whitespace-pre-wrap mb-3">
@@ -372,7 +383,9 @@ ${installCliName} --help`}
             </pre>
           ) : (
             <p className="text-sm text-gray-400 mb-3">
-              An error occurred during CLI generation.
+              {isPipelineError
+                ? 'An error occurred during CLI generation.'
+                : 'Generated package validation needs review before approval.'}
             </p>
           )}
           <Link

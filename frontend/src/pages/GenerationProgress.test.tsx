@@ -19,7 +19,11 @@ function sessionWithStatus(status: string) {
   return {
     ...validationFailedSession,
     status,
-    error_message: status === 'complete' ? null : 'Generated package needs review',
+    error_message: status === 'complete'
+      ? null
+      : status === 'error'
+        ? 'Generation worker crashed'
+        : 'Generated package needs review',
   }
 }
 
@@ -94,7 +98,7 @@ describe('GenerationProgress status handling', () => {
 
     const view = renderProgress()
 
-    expect(await screen.findByText('Generation Needs Review')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Generation Needs Review', level: 1 })).toBeInTheDocument()
     expect(screen.getByText('Validate')).toHaveClass('text-red-400')
     await waitFor(() => {
       expect(FakeWebSocket.instances[0]?.url).toContain('/ws/generation/s1?token=generation-ws-token')
@@ -123,9 +127,28 @@ describe('GenerationProgress status handling', () => {
 
     renderProgress()
 
-    expect(await screen.findByText('Generation Needs Review')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Generation Needs Review', level: 1 })).toBeInTheDocument()
     expect(screen.getByText('Validate')).toHaveClass('text-red-400')
     await waitFor(() => expect(clearIntervalSpy).toHaveBeenCalled())
+  })
+
+  it('distinguishes pipeline errors from review-needed validation failures', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    server.use(
+      http.get('/api/sessions/s1', () => HttpResponse.json(sessionWithStatus('error'))),
+      http.get('/api/sessions/s1/status', () => HttpResponse.json({
+        session_id: 's1',
+        status: 'error',
+        latest_attempt: attemptWithStatus('error'),
+      })),
+      http.get('/api/auth/ws-token', () => HttpResponse.json({ token: 'generation-ws-token' })),
+    )
+
+    renderProgress()
+
+    expect(await screen.findByRole('heading', { name: 'Generation Failed', level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Generation Needs Review', level: 1 })).not.toBeInTheDocument()
+    expect(screen.getByText('Generation worker crashed')).toBeInTheDocument()
   })
 
   it('does not show rejected attempts as pending approval', async () => {

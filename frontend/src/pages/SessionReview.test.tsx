@@ -78,7 +78,7 @@ describe('SessionReview safety defaults', () => {
 
     expect(await screen.findByText('Metadata-first')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /patient lookup/i }))
-    await userEvent.click(await screen.findByRole('button', { name: /api\.example\.test/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /https:\/\/api\.example\.test\/patients/i }))
 
     expect(await screen.findByText(/raw bodies are not stored by default/i)).toBeInTheDocument()
     expect(screen.queryByText(/jane doe/i)).not.toBeInTheDocument()
