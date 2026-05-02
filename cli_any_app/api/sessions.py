@@ -2,7 +2,7 @@ import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, field_validator
 from sqlalchemy import select
 
 from cli_any_app.audit import record_audit_event
@@ -18,6 +18,11 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 class SessionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     app_name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name", "app_name", mode="before")
+    @classmethod
+    def strip_required_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class SessionResponse(BaseModel):
@@ -40,8 +45,8 @@ class SessionResponse(BaseModel):
 async def create_session(body: SessionCreate):
     async with get_session() as db:
         session = Session(
-            name=body.name.strip(),
-            app_name=body.app_name.strip(),
+            name=body.name,
+            app_name=body.app_name,
             retention_days=settings.default_retention_days,
         )
         db.add(session)

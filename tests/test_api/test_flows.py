@@ -34,6 +34,18 @@ async def test_create_flow(client, session_id):
     assert "id" in data
 
 
+async def test_create_flow_strips_label_and_rejects_blank_or_oversized(client, session_id):
+    blank = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "   "})
+    assert blank.status_code == 422
+
+    oversized = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "x" * 121})
+    assert oversized.status_code == 422
+
+    resp = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "  Login flow  "})
+    assert resp.status_code == 201
+    assert resp.json()["label"] == "Login flow"
+
+
 async def test_create_flow_auto_order(client, session_id):
     first = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "Flow 1"})
     await client.post(f"/api/sessions/{session_id}/flows/{first.json()['id']}/stop")

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, field_validator
 from sqlalchemy import select, func
 
 from cli_any_app.audit import record_audit_event
@@ -17,7 +17,12 @@ router = APIRouter(prefix="/api/sessions/{session_id}/flows", tags=["flows"])
 
 
 class FlowCreate(BaseModel):
-    label: str
+    label: str = Field(min_length=1, max_length=120)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def strip_label(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class FlowResponse(BaseModel):
