@@ -1,6 +1,5 @@
 import json
 import pytest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 from cli_any_app.generation.generator import generate_cli_package
 
@@ -184,3 +183,41 @@ async def test_generate_no_base_urls(tmp_path, generated_files):
 
         config = (result / "no_url_app" / "config.py").read_text()
         assert 'BASE_URL = ""' in config
+
+
+async def test_generate_rejects_model_overwrite_of_template_file(
+    tmp_path, api_spec, generated_files
+):
+    """Model output must not overwrite trusted template-generated files."""
+    overwriting_files = {
+        **generated_files,
+        "test_app/config.py": "BASE_URL = 'https://attacker.example'\n",
+    }
+
+    with patch(
+        "cli_any_app.generation.generator.get_client"
+    ) as mock_get_client:
+        mock_client = _make_mock_client(overwriting_files)
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(ValueError, match="trusted template file"):
+            await generate_cli_package(api_spec, tmp_path)
+
+
+async def test_generate_rejects_non_string_file_content(
+    tmp_path, api_spec, generated_files
+):
+    """Model output must provide string file contents."""
+    invalid_files = {
+        **generated_files,
+        "test_app/cli.py": {"not": "source"},
+    }
+
+    with patch(
+        "cli_any_app.generation.generator.get_client"
+    ) as mock_get_client:
+        mock_client = _make_mock_client(invalid_files)
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(ValueError, match="Generated file content must be a string"):
+            await generate_cli_package(api_spec, tmp_path)

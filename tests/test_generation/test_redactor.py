@@ -1,4 +1,8 @@
-from cli_any_app.generation.redactor import redact_sensitive_data
+from cli_any_app.generation.redactor import (
+    has_unredacted_sensitive_data,
+    redact_sensitive_data,
+    redact_url,
+)
 
 
 def test_redacts_bearer_tokens():
@@ -42,3 +46,36 @@ def test_does_not_mutate_original():
     result = redact_sensitive_data(data)
     assert data["flows"][0]["requests"][0]["request_body"]["password"] == "secret"
     assert result["flows"][0]["requests"][0]["request_body"]["password"] == "<REDACTED>"
+
+
+def test_preflight_ignores_redacted_placeholders():
+    data = {
+        "flows": [{"requests": [{
+            "request_body": {
+                "patient_id": "<PATIENT_ID:1234567890>",
+                "email": "<EMAIL:abcdef1234>",
+                "phone": "<PHONE:abcdef1234>",
+            }
+        }]}]
+    }
+
+    assert has_unredacted_sensitive_data(data) is False
+
+
+def test_preflight_flags_unredacted_sensitive_data():
+    data = {"value": "patient_id=ABCD1234"}
+
+    assert has_unredacted_sensitive_data(data) is True
+
+
+def test_redact_url_drops_basic_auth_userinfo():
+    redacted = redact_url(
+        "https://user:password@api.example.test:8443/patients/jane.doe@example.com"
+        "?token=secret&visit=MRN-12345"
+    )
+
+    assert redacted.startswith("https://api.example.test:8443/")
+    assert "user:password" not in redacted
+    assert "jane.doe@example.com" not in redacted
+    assert "secret" not in redacted
+    assert "MRN-12345" not in redacted

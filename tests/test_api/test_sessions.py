@@ -23,8 +23,24 @@ async def test_create_session(client):
     data = resp.json()
     assert data["name"] == "Test"
     assert data["app_name"] == "test-app"
-    assert data["status"] == "stopped"
+    assert data["status"] == "created"
     assert "id" in data
+
+
+async def test_create_session_strips_names_and_rejects_blank_or_oversized(client):
+    blank_name = await client.post("/api/sessions", json={"name": "   ", "app_name": "test-app"})
+    assert blank_name.status_code == 422
+
+    blank_app = await client.post("/api/sessions", json={"name": "Test", "app_name": "   "})
+    assert blank_app.status_code == 422
+
+    oversized = await client.post("/api/sessions", json={"name": "x" * 121, "app_name": "test-app"})
+    assert oversized.status_code == 422
+
+    resp = await client.post("/api/sessions", json={"name": "  Test  ", "app_name": "  test-app  "})
+    assert resp.status_code == 201
+    assert resp.json()["name"] == "Test"
+    assert resp.json()["app_name"] == "test-app"
 
 
 async def test_list_sessions(client):
@@ -65,7 +81,7 @@ async def test_start_recording_conflict_returns_409(client, monkeypatch):
 
     state = {"running": False, "owner": None}
 
-    def fake_start(session_id, port=None):
+    def fake_start(session_id, port=None, capture_token=None):
         if state["running"] and state["owner"] != session_id:
             raise RuntimeError(f"Proxy already running for session {state['owner']}")
         state["running"] = True
@@ -90,7 +106,7 @@ async def test_stop_recording_other_session_returns_409(client, monkeypatch):
 
     state = {"running": False, "owner": None}
 
-    def fake_start(session_id, port=None):
+    def fake_start(session_id, port=None, capture_token=None):
         state["running"] = True
         state["owner"] = session_id
         return port or 8080

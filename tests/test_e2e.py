@@ -6,9 +6,6 @@ from httpx import ASGITransport, AsyncClient
 async def setup_db(tmp_path):
     from cli_any_app.models.database import init_db
     await init_db(f"sqlite+aiosqlite:///{tmp_path}/test.db")
-    # Reset the in-memory domain filter state between tests
-    from cli_any_app.api.domains import _domain_filters
-    _domain_filters.clear()
     yield
 
 
@@ -26,7 +23,7 @@ async def test_full_capture_flow(client):
     assert resp.status_code == 201
     session = resp.json()
     session_id = session["id"]
-    assert session["status"] == "stopped"
+    assert session["status"] == "created"
 
     # 2. Create a flow
     resp = await client.post(f"/api/sessions/{session_id}/flows", json={"label": "login"})
@@ -67,7 +64,7 @@ async def test_full_capture_flow(client):
     assert resp.status_code == 202
     assert resp.json()["is_api"] is False
 
-    # Noise domain request (should be filtered)
+    # Noise domain request (stored as metadata and disabled by default)
     resp = await client.post("/api/internal/capture", json={
         "session_id": session_id,
         "method": "POST",
@@ -80,7 +77,7 @@ async def test_full_capture_flow(client):
         "content_type": "application/json",
     })
     assert resp.status_code == 202
-    assert resp.json()["status"] == "filtered_noise"
+    assert resp.json()["status"] == "captured"
 
     # 4. List domains
     resp = await client.get(f"/api/sessions/{session_id}/domains")
@@ -89,7 +86,7 @@ async def test_full_capture_flow(client):
     domain_names = [d["domain"] for d in domains]
     assert "api.example.com" in domain_names
     assert "cdn.example.com" in domain_names
-    # firebase was filtered at capture time, so it should not appear in domains
+    assert "firebaselogging.googleapis.com" in domain_names
 
     # Verify domain enabled state
     api_domain = next(d for d in domains if d["domain"] == "api.example.com")

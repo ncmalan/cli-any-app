@@ -1,3 +1,5 @@
+from cli_any_app.capture.filters import normalize_domain
+
 NOISE_DOMAIN_PATTERNS = [
     "*.apple.com", "*.icloud.com", "*.mzstatic.com", "*.apple-dns.net",
     "firebaselogging.googleapis.com", "app-measurement.com",
@@ -13,6 +15,7 @@ NOISE_DOMAIN_PATTERNS = [
 
 
 def matches_noise_pattern(domain: str) -> bool:
+    domain = normalize_domain(domain)
     for pattern in NOISE_DOMAIN_PATTERNS:
         if pattern.startswith("*."):
             suffix = pattern[1:]

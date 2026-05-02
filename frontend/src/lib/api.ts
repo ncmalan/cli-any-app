@@ -1,12 +1,53 @@
 const BASE = '/api'
 
+let activeCsrfToken = ''
+
+function csrfToken(): string {
+  return activeCsrfToken
+}
+
+export function clearCsrfToken(): void {
+  activeCsrfToken = ''
+}
+
+function rememberCsrfToken<T extends { csrf_token?: string | null }>(status: T): T {
+  activeCsrfToken = status.csrf_token ?? ''
+  return status
+}
+
+async function safeError(res: Response): Promise<Error> {
+  try {
+    const data = await res.json()
+    const detail = typeof data.detail === 'string' ? data.detail : 'Request failed'
+    return new Error(`${res.status}: ${detail}`)
+  } catch {
+    return new Error(`${res.status}: Request failed`)
+  }
+}
+
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const headers = new Headers(init?.headers)
+  headers.set('Content-Type', 'application/json')
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const token = csrfToken()
+    if (token) headers.set('X-CSRF-Token', token)
+  }
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    credentials: 'same-origin',
+    headers,
   })
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
+  if (res.status === 401) clearCsrfToken()
+  if (!res.ok) throw await safeError(res)
+  if (res.status === 204) return undefined as T
   return res.json()
+}
+
+export interface AuthStatus {
+  authenticated: boolean
+  username: string | null
+  csrf_token: string | null
 }
 
 export interface Session {
@@ -31,6 +72,7 @@ export interface Flow {
 export interface DomainInfo {
   domain: string
   request_count: number
+  api_request_count?: number
   is_noise: boolean
   enabled: boolean
 }
@@ -54,11 +96,58 @@ export interface CapturedRequest {
   url: string
   request_headers: string
   request_body: string | null
+  request_body_size: number
+  request_body_hash: string | null
   status_code: number
   response_headers: string
   response_body: string | null
+  response_body_size: number
+  response_body_hash: string | null
+  redaction_status: string
   content_type: string
   is_api: boolean
+}
+
+export interface GenerationAttempt {
+  id: string
+  status: string
+  approval_status: string
+  package_path: string
+  cli_name: string
+  validation: { valid?: boolean; errors?: string[]; warnings?: string[] }
+  created_at: string
+  completed_at: string | null
+}
+
+export interface GenerationStatus {
+  session_id: string
+  status: string
+  latest_attempt: GenerationAttempt | null
+}
+
+// Auth
+export async function login(password: string): Promise<AuthStatus> {
+  const status = await fetchJson<AuthStatus>('/auth/login', { method: 'POST', body: JSON.stringify({ password }) })
+  return rememberCsrfToken(status)
+}
+
+export async function logout(): Promise<AuthStatus> {
+  try {
+    const status = await fetchJson<AuthStatus>('/auth/logout', { method: 'POST' })
+    return rememberCsrfToken(status)
+  } finally {
+    clearCsrfToken()
+  }
+}
+
+export async function getMe(): Promise<AuthStatus> {
+  const status = await fetchJson<AuthStatus>('/auth/me')
+  return rememberCsrfToken(status)
+}
+
+export async function getWsToken(): Promise<string> {
+  const result = await fetchJson<{ token: string }>('/auth/ws-token')
+  return result.token
 }
 
 // Sessions
@@ -75,8 +164,7 @@ export async function getSession(id: string): Promise<Session> {
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/sessions/${id}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
+  await fetchJson(`/sessions/${id}`, { method: 'DELETE' })
 }
 
 export async function startRecording(id: string): Promise<Session> {
@@ -101,8 +189,7 @@ export async function stopFlow(sessionId: string, flowId: string): Promise<Flow>
 }
 
 export async function deleteFlow(sessionId: string, flowId: string): Promise<void> {
-  const res = await fetch(`${BASE}/sessions/${sessionId}/flows/${flowId}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
+  await fetchJson(`/sessions/${sessionId}/flows/${flowId}`, { method: 'DELETE' })
 }
 
 // Domains
@@ -111,14 +198,32 @@ export async function listDomains(sessionId: string): Promise<DomainInfo[]> {
 }
 
 export async function toggleDomain(sessionId: string, domain: string, enabled: boolean): Promise<DomainInfo> {
-  return fetchJson(`/sessions/${sessionId}/domains/${domain}`, {
+  return fetchJson(`/sessions/${sessionId}/domains/${encodeURIComponent(domain)}`, {
     method: 'PUT', body: JSON.stringify({ enabled })
   })
 }
 
 // Generation
 export async function startGeneration(sessionId: string): Promise<void> {
-  await fetchJson(`/sessions/${sessionId}/generate`, { method: 'POST' })
+  await fetchJson(`/sessions/${sessionId}/generate`, {
+    method: 'POST',
+    body: JSON.stringify({ reviewer_acknowledged: true }),
+  })
+}
+
+export async function getGenerationStatus(sessionId: string): Promise<GenerationStatus> {
+  return fetchJson(`/sessions/${sessionId}/status`)
+}
+
+export async function approveGenerationAttempt(
+  sessionId: string,
+  attemptId: string,
+  reason: string,
+): Promise<GenerationAttempt> {
+  return fetchJson(`/sessions/${sessionId}/generation-attempts/${attemptId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
 }
 
 // Network

@@ -75,7 +75,7 @@ export default function SessionSetup() {
             disabled={submitting}
             className="bg-blue-600 px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {submitting ? 'Creating...' : 'Create & Start Recording'}
+            {submitting ? 'Creating...' : 'Create Session'}
           </button>
           <Link
             to="/"

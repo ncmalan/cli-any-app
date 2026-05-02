@@ -1,6 +1,7 @@
-import subprocess
 import signal
+import subprocess
 from pathlib import Path
+
 from cli_any_app.config import settings
 
 
@@ -14,18 +15,35 @@ class ProxyManager:
     def addon_path(self) -> str:
         return str(Path(__file__).parent / "addon.py")
 
-    def start(self, session_id: str, port: int | None = None) -> int:
+    def start(self, session_id: str, port: int | None = None, capture_token: str | None = None) -> int:
         proxy_port = port or settings.proxy_port
         if self.process and self.process.poll() is None:
             if self.active_session_id == session_id:
                 return self.active_port or proxy_port
             raise RuntimeError(f"Proxy already running for session {self.active_session_id}")
         server_url = f"http://127.0.0.1:{settings.port}"
+        env = None
+        if capture_token:
+            import os
+
+            env = {**os.environ, "CLI_ANY_APP_CAPTURE_TOKEN": capture_token}
         self.process = subprocess.Popen(
-            ["mitmdump", "--listen-port", str(proxy_port), "-s", self.addon_path,
-             "--set", f"server_url={server_url}", "--set", f"capture_session_id={session_id}",
-             "--set", "connection_strategy=lazy"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            [
+                "mitmdump",
+                "--listen-port",
+                str(proxy_port),
+                "-s",
+                self.addon_path,
+                "--set",
+                f"server_url={server_url}",
+                "--set",
+                f"capture_session_id={session_id}",
+                "--set",
+                "connection_strategy=lazy",
+            ],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         self.active_session_id = session_id
         self.active_port = proxy_port

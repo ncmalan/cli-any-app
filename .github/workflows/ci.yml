@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Build packaged frontend assets
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+      - name: Ruff
+        run: ruff check .
+      - name: Tests
+        run: pytest tests/ -q --cov=cli_any_app --cov-report=term-missing
+      - name: Python dependency audit
+        run: pip-audit
+      - name: Python SBOM
+        run: pip-audit --format cyclonedx-json --output sbom-python.cdx.json
+      - name: Build distributions
+        run: |
+          python -m pip install build
+          python -m build
+      - name: Wheel smoke install
+        run: |
+          python -m venv /tmp/cli-any-app-smoke
+          /tmp/cli-any-app-smoke/bin/python -m pip install dist/*.whl
+          /tmp/cli-any-app-smoke/bin/python -c "from cli_any_app.main import app; assert app.title == 'cli-any-app'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-artifacts
+          path: |
+            dist/*
+            sbom-python.cdx.json
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Tests
+        run: npm run test
+      - name: Frontend dependency audit
+        run: npm audit --audit-level=high
+      - name: Frontend SBOM
+        run: npm sbom --sbom-format cyclonedx > sbom-frontend.cdx.json
+      - name: Build
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-artifacts
+          path: |
+            frontend/sbom-frontend.cdx.json

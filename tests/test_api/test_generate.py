@@ -5,17 +5,17 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from cli_any_app.api.generate import _run_generation
+from cli_any_app.models.audit_event import AuditEvent
 from cli_any_app.models.generated_cli import GeneratedCLI
+from cli_any_app.models.generation_attempt import GenerationAttempt
 from cli_any_app.models.session import Session
 
 
 @pytest.fixture(autouse=True)
 async def setup_db(tmp_path):
     from cli_any_app.models.database import init_db
-    from cli_any_app.api.domains import _domain_filters
 
     await init_db(f"sqlite+aiosqlite:///{tmp_path}/test.db")
-    _domain_filters.clear()
     yield
 
 
@@ -86,6 +86,21 @@ async def test_start_generation_respects_disabled_domains(client):
     ]
 
 
+async def test_start_generation_rejects_concurrent_generation(client):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app", status="generating")
+        db.add(session)
+        await db.commit()
+        session_id = session.id
+
+    resp = await client.post(f"/api/sessions/{session_id}/generate")
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Generation already in progress"
+
+
 async def test_run_generation_upserts_generated_cli(tmp_path):
     from cli_any_app.models.database import get_session
 
@@ -133,3 +148,219 @@ async def test_run_generation_upserts_generated_cli(tmp_path):
         assert session is not None
         assert session.status == "complete"
         assert session.error_message is None
+
+
+async def test_run_generation_marks_static_validation_errors_failed(tmp_path):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app", status="generating")
+        db.add(session)
+        await db.flush()
+        attempt = GenerationAttempt(session_id=session.id, status="started")
+        db.add(attempt)
+        await db.commit()
+        session_id = session.id
+        attempt_id = attempt.id
+
+    package_dir = tmp_path / "static-failure"
+    package_dir.mkdir()
+    (package_dir / "SKILL.md").write_text("generated skill")
+
+    mock_run_pipeline = AsyncMock(return_value={
+        "status": "validation_errors",
+        "api_spec": {"app_name": "test-app"},
+        "package_path": str(package_dir),
+        "validation": {
+            "valid": False,
+            "errors": ["Unsafe import in cli.py: subprocess"],
+            "warnings": [],
+        },
+    })
+
+    with patch("cli_any_app.api.generate.run_pipeline", mock_run_pipeline):
+        await _run_generation(session_id, {"app_name": "test-app", "flows": []}, attempt_id)
+
+    async with get_session() as db:
+        session = await db.get(Session, session_id)
+        attempt = await db.get(GenerationAttempt, attempt_id)
+        assert session.status == "validation_failed"
+        assert attempt.status == "validation_failed"
+
+
+async def test_run_generation_marks_review_required_smoke_failures_needs_review(tmp_path):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app", status="generating")
+        db.add(session)
+        await db.flush()
+        attempt = GenerationAttempt(session_id=session.id, status="started")
+        db.add(attempt)
+        await db.commit()
+        session_id = session.id
+        attempt_id = attempt.id
+
+    package_dir = tmp_path / "smoke-failure"
+    package_dir.mkdir()
+    (package_dir / "SKILL.md").write_text("generated skill")
+
+    mock_run_pipeline = AsyncMock(return_value={
+        "status": "validation_errors",
+        "api_spec": {"app_name": "test-app"},
+        "package_path": str(package_dir),
+        "validation": {
+            "valid": False,
+            "errors": ["Smoke --help failed: usage crashed"],
+            "warnings": [],
+        },
+    })
+
+    with patch("cli_any_app.api.generate.run_pipeline", mock_run_pipeline):
+        await _run_generation(session_id, {"app_name": "test-app", "flows": []}, attempt_id)
+
+    async with get_session() as db:
+        session = await db.get(Session, session_id)
+        attempt = await db.get(GenerationAttempt, attempt_id)
+        assert session.status == "needs_review"
+        assert attempt.status == "needs_review"
+
+
+async def test_approve_generation_attempt_requires_validated_success(client):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app")
+        db.add(session)
+        await db.flush()
+        attempt = GenerationAttempt(
+            session_id=session.id,
+            status="complete",
+            validation_report_json='{"valid": true, "errors": [], "warnings": []}',
+            package_path="/tmp/generated/test",
+            approval_status="pending",
+        )
+        db.add(attempt)
+        await db.commit()
+        session_id = session.id
+        attempt_id = attempt.id
+
+    resp = await client.post(
+        f"/api/sessions/{session_id}/generation-attempts/{attempt_id}/approve",
+        json={"reason": "  Reviewed generated files and validation report  "},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["approval_status"] == "approved"
+
+    async with get_session() as db:
+        approved = await db.get(GenerationAttempt, attempt_id)
+        assert approved.approval_status == "approved"
+        events = await db.execute(select(AuditEvent).where(AuditEvent.event_type == "generation.approved"))
+        audit_events = events.scalars().all()
+        assert len(audit_events) == 1
+        assert audit_events[0].reason == "Reviewed generated files and validation report"
+
+
+async def test_approve_generation_attempt_rejects_blank_reason(client):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app")
+        db.add(session)
+        await db.flush()
+        attempt = GenerationAttempt(
+            session_id=session.id,
+            status="complete",
+            validation_report_json='{"valid": true, "errors": [], "warnings": []}',
+            approval_status="pending",
+        )
+        db.add(attempt)
+        await db.commit()
+        session_id = session.id
+        attempt_id = attempt.id
+
+    resp = await client.post(
+        f"/api/sessions/{session_id}/generation-attempts/{attempt_id}/approve",
+        json={"reason": "   "},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Reason is required"
+
+    async with get_session() as db:
+        attempt = await db.get(GenerationAttempt, attempt_id)
+        assert attempt.approval_status == "pending"
+        events = await db.execute(select(AuditEvent).where(AuditEvent.event_type == "generation.approved"))
+        assert events.scalars().all() == []
+
+
+async def test_approve_generation_attempt_rejects_failed_validation(client):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app")
+        db.add(session)
+        await db.flush()
+        attempt = GenerationAttempt(
+            session_id=session.id,
+            status="validation_failed",
+            validation_report_json='{"valid": false, "errors": ["bad"], "warnings": []}',
+            approval_status="pending",
+        )
+        db.add(attempt)
+        await db.commit()
+        session_id = session.id
+        attempt_id = attempt.id
+
+    resp = await client.post(
+        f"/api/sessions/{session_id}/generation-attempts/{attempt_id}/approve",
+        json={"reason": "Trying to approve failed output"},
+    )
+    assert resp.status_code == 409
+
+
+async def test_generation_status_hides_deleted_sessions(client):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Deleted", app_name="test-app", status="deleted")
+        db.add(session)
+        await db.commit()
+        session_id = session.id
+
+    resp = await client.get(f"/api/sessions/{session_id}/status")
+    assert resp.status_code == 404
+
+
+async def test_generation_status_includes_generated_cli_name(client, tmp_path):
+    from cli_any_app.models.database import get_session
+
+    package_dir = tmp_path / "generated"
+    package_dir.mkdir()
+    (package_dir / "pyproject.toml").write_text(
+        """
+[project]
+name = "patient-portal"
+
+[project.scripts]
+patient-portal = "patient_portal.cli:cli"
+""".strip()
+    )
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="Patient Portal")
+        db.add(session)
+        await db.flush()
+        attempt = GenerationAttempt(
+            session_id=session.id,
+            status="complete",
+            validation_report_json='{"valid": true, "errors": [], "warnings": []}',
+            package_path=str(package_dir),
+            approval_status="approved",
+        )
+        db.add(attempt)
+        await db.commit()
+        session_id = session.id
+
+    resp = await client.get(f"/api/sessions/{session_id}/status")
+    assert resp.status_code == 200
+    assert resp.json()["latest_attempt"]["cli_name"] == "patient-portal"
