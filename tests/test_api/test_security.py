@@ -135,6 +135,49 @@ def test_unsign_payload_rejects_malformed_expiry_values():
     assert unsign_payload(non_numeric_exp, SESSION_PURPOSE) is None
 
 
+def test_private_secret_writes_reject_symlink_targets(tmp_path):
+    from cli_any_app.config import settings
+    from cli_any_app.security import _write_private
+
+    settings.secrets_dir.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("safe")
+    link = settings.secrets_dir / "admin-password.hash"
+    link.symlink_to(outside)
+
+    with pytest.raises(RuntimeError, match="symlink"):
+        _write_private(link, "overwritten")
+
+    assert outside.read_text() == "safe"
+
+
+def test_payload_key_write_rejects_symlink_targets(tmp_path):
+    from cli_any_app.capture.privacy import _private_write
+    from cli_any_app.config import settings
+
+    settings.secrets_dir.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "payload-target.key"
+    outside.write_bytes(b"safe")
+    link = settings.secrets_dir / "payload-data.key"
+    link.symlink_to(outside)
+
+    with pytest.raises(RuntimeError, match="symlink"):
+        _private_write(link, b"overwritten")
+
+    assert outside.read_bytes() == b"safe"
+
+
+def test_private_secret_writes_reject_paths_outside_secrets_dir(tmp_path):
+    from cli_any_app.private_files import write_private_bytes
+
+    outside_dir = tmp_path / "outside"
+
+    with pytest.raises(RuntimeError, match="outside secrets directory"):
+        write_private_bytes(outside_dir / "app-secret.key", b"secret")
+
+    assert not outside_dir.exists()
+
+
 async def test_capture_requires_valid_recording_token(client, monkeypatch):
     from cli_any_app.capture.proxy_manager import proxy_manager
     from cli_any_app.models.database import get_session

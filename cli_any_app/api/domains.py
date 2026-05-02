@@ -104,6 +104,8 @@ async def list_domains(session_id: str):
 @router.put("/{domain}", response_model=DomainInfo)
 async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
     domain = normalize_domain(domain)
+    if not domain:
+        raise HTTPException(status_code=400, detail="Domain is required")
     reason = body.reason.strip() if body.reason is not None else None
     if body.reason is not None and not reason:
         raise HTTPException(status_code=400, detail="Domain filter reason cannot be blank")

@@ -4,9 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import secrets
-import stat
 import time
 from pathlib import Path
 from typing import Any
@@ -15,6 +13,7 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException, Request, Response, WebSocket
 
 from cli_any_app.config import settings
+from cli_any_app.private_files import private_file_exists, read_private_bytes, write_private_bytes, write_private_text
 
 SESSION_PURPOSE = "session"
 WS_PURPOSE = "ws"
@@ -41,21 +40,16 @@ def _bootstrap_password_path() -> Path:
 
 
 def _write_private(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
-    with os.fdopen(fd, "w") as f:
-        f.write(content)
+    write_private_text(path, content)
 
 
 def get_app_secret() -> bytes:
     path = _secret_path()
-    if path.exists():
-        return path.read_bytes()
+    existing = read_private_bytes(path)
+    if existing is not None:
+        return existing
     secret = secrets.token_bytes(32)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IRUSR | stat.S_IWUSR)
-    with os.fdopen(fd, "wb") as f:
-        f.write(secret)
+    write_private_bytes(path, secret)
     return secret
 
 
@@ -85,7 +79,7 @@ def ensure_admin_password() -> str | None:
     if settings.admin_password:
         _write_private(path, hash_secret(settings.admin_password))
         return None
-    if path.exists():
+    if private_file_exists(path):
         return None
     bootstrap = secrets.token_urlsafe(18)
     _write_private(path, hash_secret(bootstrap))
@@ -96,9 +90,10 @@ def ensure_admin_password() -> str | None:
 def verify_admin_password(password: str) -> bool:
     ensure_admin_password()
     path = _admin_hash_path()
-    if not path.exists():
+    encoded = read_private_bytes(path)
+    if encoded is None:
         return False
-    return verify_secret(password, path.read_text().strip())
+    return verify_secret(password, encoded.decode().strip())
 
 
 def sign_payload(payload: dict[str, Any], purpose: str, ttl_seconds: int) -> str:

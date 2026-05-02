@@ -116,6 +116,18 @@ async def test_toggle_domain_disable(client):
     assert example["enabled"] is False
 
 
+async def test_toggle_domain_rejects_empty_normalized_domain(client):
+    session_id = await _create_session_with_requests(client)
+
+    resp = await client.put(
+        f"/api/sessions/{session_id}/domains/%20%20%20",
+        json={"enabled": True},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Domain is required"
+
+
 async def test_domain_listing_normalizes_host_before_noise_detection(client):
     from cli_any_app.models.database import get_session
     from cli_any_app.models.flow import Flow

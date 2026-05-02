@@ -3,9 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import os
 import re
-import stat
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
@@ -13,6 +11,7 @@ from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsp
 from cryptography.fernet import Fernet
 
 from cli_any_app.config import settings
+from cli_any_app.private_files import read_private_bytes, write_private_bytes
 
 REDACTED = "<REDACTED>"
 REDACTED_TOKEN = "<REDACTED_TOKEN>"
@@ -108,10 +107,7 @@ def stable_placeholder(label: str, value: str) -> str:
 
 
 def _private_write(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
+    write_private_bytes(path, data)
 
 
 def _data_key_path() -> Path:
@@ -120,8 +116,9 @@ def _data_key_path() -> Path:
 
 def _get_payload_fernet() -> Fernet:
     path = _data_key_path()
-    if path.exists():
-        return Fernet(path.read_bytes())
+    existing = read_private_bytes(path)
+    if existing is not None:
+        return Fernet(existing)
     key = Fernet.generate_key()
     _private_write(path, key)
     return Fernet(key)
