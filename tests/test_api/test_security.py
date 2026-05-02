@@ -44,6 +44,7 @@ async def _login(client: AsyncClient) -> str:
 async def test_rest_requires_authentication(client):
     resp = await client.get("/api/sessions")
     assert resp.status_code == 401
+    assert resp.headers["cache-control"] == "no-store"
     csp = resp.headers["content-security-policy"]
     assert "connect-src 'self' ws://testserver wss://testserver" in csp
     assert " ws: " not in csp
@@ -67,6 +68,7 @@ async def test_state_change_requires_csrf(client):
 
     missing = await client.post("/api/sessions", json={"name": "S1", "app_name": "app"})
     assert missing.status_code == 403
+    assert missing.headers["cache-control"] == "no-store"
 
     ok = await client.post(
         "/api/sessions",

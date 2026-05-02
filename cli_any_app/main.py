@@ -97,8 +97,10 @@ async def auth_middleware(request: Request, call_next):
             if request.method not in {"GET", "HEAD", "OPTIONS"}:
                 require_csrf(request, session)
         except HTTPException as exc:
+            response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+            response.headers.setdefault("Cache-Control", "no-store")
             return _apply_security_headers(
-                JSONResponse({"detail": exc.detail}, status_code=exc.status_code),
+                response,
                 request,
             )
     response = await call_next(request)
