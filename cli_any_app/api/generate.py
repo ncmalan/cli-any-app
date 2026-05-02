@@ -24,6 +24,13 @@ from cli_any_app.models.session import Session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sessions/{session_id}", tags=["generation"])
+REVIEW_REQUIRED_ERROR_PREFIXES = (
+    "Smoke test requires an explicit build-system",
+    "Smoke install failed:",
+    "Smoke --help failed:",
+    "Smoke --help failed to start:",
+    "Console script not found after install:",
+)
 
 
 class GenerationStartRequest(BaseModel):
@@ -39,6 +46,35 @@ def _clean_reason(reason: str) -> str:
     if not cleaned:
         raise HTTPException(400, "Reason is required")
     return cleaned
+
+
+def _generation_status_from_result(result: dict) -> str:
+    validation = result.get("validation", {})
+    errors = validation.get("errors", []) if isinstance(validation, dict) else []
+    validation_valid = validation.get("valid") if isinstance(validation, dict) else None
+    if result.get("status") == "success" and validation_valid is not False and not errors:
+        return "complete"
+
+    if errors and all(
+        any(str(error).startswith(prefix) for prefix in REVIEW_REQUIRED_ERROR_PREFIXES)
+        for error in errors
+    ):
+        return "needs_review"
+    if not errors:
+        return "needs_review"
+    return "validation_failed"
+
+
+async def _broadcast_terminal_generation_status(
+    on_progress,
+    final_status: str,
+) -> None:
+    if final_status == "complete":
+        await on_progress("complete", "Generation complete!")
+    elif final_status == "needs_review":
+        await on_progress("needs_review", "Generation needs review")
+    else:
+        await on_progress("validation_failed", "Generation validation failed")
 
 
 def _attempt_payload(attempt: GenerationAttempt | None) -> dict | None:
@@ -167,13 +203,14 @@ async def _run_generation(session_id: str, session_data: dict, attempt_id: str |
     try:
         await on_progress("starting", "Generation pipeline started")
         result = await run_pipeline(session_data, session_id, on_progress=on_progress)
-        await on_progress("complete", "Generation complete!")
+        final_status = _generation_status_from_result(result)
+        await _broadcast_terminal_generation_status(on_progress, final_status)
 
         async with get_session() as db:
             session = await db.get(Session, session_id)
             if not session:
                 return
-            session.status = "complete" if result["status"] == "success" else "validation_failed"
+            session.status = final_status
 
             generated_result = await db.execute(
                 select(GeneratedCLI).where(GeneratedCLI.session_id == session_id)

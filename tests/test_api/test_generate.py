@@ -150,6 +150,82 @@ async def test_run_generation_upserts_generated_cli(tmp_path):
         assert session.error_message is None
 
 
+async def test_run_generation_marks_static_validation_errors_failed(tmp_path):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app", status="generating")
+        db.add(session)
+        await db.flush()
+        attempt = GenerationAttempt(session_id=session.id, status="started")
+        db.add(attempt)
+        await db.commit()
+        session_id = session.id
+        attempt_id = attempt.id
+
+    package_dir = tmp_path / "static-failure"
+    package_dir.mkdir()
+    (package_dir / "SKILL.md").write_text("generated skill")
+
+    mock_run_pipeline = AsyncMock(return_value={
+        "status": "validation_errors",
+        "api_spec": {"app_name": "test-app"},
+        "package_path": str(package_dir),
+        "validation": {
+            "valid": False,
+            "errors": ["Unsafe import in cli.py: subprocess"],
+            "warnings": [],
+        },
+    })
+
+    with patch("cli_any_app.api.generate.run_pipeline", mock_run_pipeline):
+        await _run_generation(session_id, {"app_name": "test-app", "flows": []}, attempt_id)
+
+    async with get_session() as db:
+        session = await db.get(Session, session_id)
+        attempt = await db.get(GenerationAttempt, attempt_id)
+        assert session.status == "validation_failed"
+        assert attempt.status == "validation_failed"
+
+
+async def test_run_generation_marks_review_required_smoke_failures_needs_review(tmp_path):
+    from cli_any_app.models.database import get_session
+
+    async with get_session() as db:
+        session = Session(name="Test", app_name="test-app", status="generating")
+        db.add(session)
+        await db.flush()
+        attempt = GenerationAttempt(session_id=session.id, status="started")
+        db.add(attempt)
+        await db.commit()
+        session_id = session.id
+        attempt_id = attempt.id
+
+    package_dir = tmp_path / "smoke-failure"
+    package_dir.mkdir()
+    (package_dir / "SKILL.md").write_text("generated skill")
+
+    mock_run_pipeline = AsyncMock(return_value={
+        "status": "validation_errors",
+        "api_spec": {"app_name": "test-app"},
+        "package_path": str(package_dir),
+        "validation": {
+            "valid": False,
+            "errors": ["Smoke --help failed: usage crashed"],
+            "warnings": [],
+        },
+    })
+
+    with patch("cli_any_app.api.generate.run_pipeline", mock_run_pipeline):
+        await _run_generation(session_id, {"app_name": "test-app", "flows": []}, attempt_id)
+
+    async with get_session() as db:
+        session = await db.get(Session, session_id)
+        attempt = await db.get(GenerationAttempt, attempt_id)
+        assert session.status == "needs_review"
+        assert attempt.status == "needs_review"
+
+
 async def test_approve_generation_attempt_requires_validated_success(client):
     from cli_any_app.models.database import get_session
 
