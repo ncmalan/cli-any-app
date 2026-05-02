@@ -137,6 +137,24 @@ def test_unsign_payload_rejects_malformed_expiry_values():
     assert unsign_payload(non_numeric_exp, SESSION_PURPOSE) is None
 
 
+def test_unsign_payload_rejects_malformed_base64_payload():
+    import hashlib
+    import hmac
+
+    from cli_any_app.security import SESSION_PURPOSE, _b64e, get_app_secret, unsign_payload
+
+    encoded = "a"
+    sig = hmac.new(get_app_secret(), encoded.encode(), hashlib.sha256).digest()
+
+    assert unsign_payload(f"{encoded}.{_b64e(sig)}", SESSION_PURPOSE) is None
+
+
+def test_verify_secret_rejects_malformed_base64_salt():
+    from cli_any_app.security import verify_secret
+
+    assert verify_secret("password", "pbkdf2_sha256$a$digest") is False
+
+
 def test_configured_admin_password_hash_is_stable_between_calls():
     from cli_any_app.config import settings
     from cli_any_app.security import ensure_admin_password, verify_admin_password

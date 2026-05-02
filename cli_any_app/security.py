@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -24,7 +25,10 @@ def _b64e(data: bytes) -> str:
 
 
 def _b64d(data: str) -> bytes:
-    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    try:
+        return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Invalid base64 payload") from exc
 
 
 def _secret_path() -> Path:
@@ -66,7 +70,11 @@ def verify_secret(value: str, encoded: str) -> bool:
         return False
     if scheme != "pbkdf2_sha256":
         return False
-    expected = hash_secret(value, _b64d(salt_b64)).split("$", 2)[2]
+    try:
+        salt = _b64d(salt_b64)
+    except ValueError:
+        return False
+    expected = hash_secret(value, salt).split("$", 2)[2]
     return hmac.compare_digest(expected, digest_b64)
 
 
