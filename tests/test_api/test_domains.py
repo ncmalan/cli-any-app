@@ -60,6 +60,7 @@ async def test_list_domains(client):
     # example.com should have highest count (3 requests)
     assert domains[0]["domain"] == "api.example.com"
     assert domains[0]["request_count"] == 3
+    assert domains[0]["api_request_count"] == 3
     assert domains[0]["is_noise"] is False
     assert domains[0]["enabled"] is True
 
@@ -93,6 +94,7 @@ async def test_toggle_domain(client):
     data = resp.json()
     assert data["domain"] == "tracking.facebook.com"
     assert data["request_count"] == 1
+    assert data["api_request_count"] == 1
     assert data["enabled"] is True
     assert data["is_noise"] is True
 
@@ -183,10 +185,61 @@ async def test_domain_listing_normalizes_host_before_noise_detection(client):
     assert toggle.status_code == 200
     assert toggle.json()["domain"] == "firebaselogging.googleapis.com"
     assert toggle.json()["request_count"] == 1
+    assert toggle.json()["api_request_count"] == 1
 
     resp = await client.get(f"/api/sessions/{session_id}/domains")
     domains = {item["domain"]: item for item in resp.json()}
     assert domains["firebaselogging.googleapis.com"]["enabled"] is True
+
+
+async def test_domain_listing_counts_api_requests_separately(client):
+    from cli_any_app.models.database import get_session
+    from cli_any_app.models.flow import Flow
+    from cli_any_app.models.request import CapturedRequest
+    from cli_any_app.models.session import Session
+
+    session = Session(name="API counts", app_name="app")
+    async with get_session() as db:
+        db.add(session)
+        await db.flush()
+        flow = Flow(session_id=session.id, label="Flow", order=1)
+        db.add(flow)
+        await db.flush()
+        db.add_all(
+            [
+                CapturedRequest(
+                    flow_id=flow.id,
+                    method="GET",
+                    url="https://api.example.com/patients",
+                    status_code=200,
+                    is_api=True,
+                ),
+                CapturedRequest(
+                    flow_id=flow.id,
+                    method="GET",
+                    url="https://api.example.com/assets/logo.png",
+                    status_code=200,
+                    is_api=False,
+                ),
+            ]
+        )
+        await db.commit()
+        session_id = session.id
+
+    resp = await client.get(f"/api/sessions/{session_id}/domains")
+    assert resp.status_code == 200
+    domain = resp.json()[0]
+    assert domain["domain"] == "api.example.com"
+    assert domain["request_count"] == 2
+    assert domain["api_request_count"] == 1
+
+    toggle = await client.put(
+        f"/api/sessions/{session_id}/domains/api.example.com",
+        json={"enabled": True},
+    )
+    assert toggle.status_code == 200
+    assert toggle.json()["request_count"] == 2
+    assert toggle.json()["api_request_count"] == 1
 
 
 async def test_toggle_domain_bounds_and_trims_reason(client):

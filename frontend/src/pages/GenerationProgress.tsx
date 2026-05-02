@@ -12,14 +12,16 @@ interface LogEntry {
   timestamp: Date
 }
 
-function stepIndex(status: string): number {
+function stepIndex(status: string, fallback: number): number {
   switch (status) {
     case 'normalizing': return 0
     case 'analyzing': return 1
     case 'generating': return 2
     case 'validating': return 3
+    case 'validation_failed': return 3
+    case 'needs_review': return 3
     case 'complete': return 4
-    case 'error': return -1
+    case 'error': return fallback
     default: return 0
   }
 }
@@ -113,9 +115,14 @@ export default function GenerationProgress() {
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
         const ws = new WebSocket(`${proto}//${window.location.host}/ws/generation/${id}?token=${encodeURIComponent(token)}`)
         wsRef.current = ws
-        ws.onopen = () => setWsState('connected')
-        ws.onclose = () => setWsState('disconnected')
+        ws.onopen = () => {
+          if (!cancelled) setWsState('connected')
+        }
+        ws.onclose = () => {
+          if (!cancelled) setWsState('disconnected')
+        }
         ws.onmessage = (event) => {
+          if (cancelled) return
           try {
             const data = JSON.parse(event.data)
             const entry: LogEntry = {
@@ -133,14 +140,20 @@ export default function GenerationProgress() {
           }
         }
       } catch {
-        setWsState('disconnected')
+        if (!cancelled) setWsState('disconnected')
       }
     }
     connect()
     return () => {
       cancelled = true
-      wsRef.current?.close()
-      wsRef.current = null
+      const ws = wsRef.current
+      if (ws) {
+        ws.onopen = null
+        ws.onclose = null
+        ws.onmessage = null
+        ws.close()
+        if (wsRef.current === ws) wsRef.current = null
+      }
     }
   }, [id])
 
@@ -151,7 +164,7 @@ export default function GenerationProgress() {
     }
   }, [logs])
 
-  const currentStep = session ? stepIndex(session.status) : activeStep
+  const currentStep = session ? stepIndex(session.status, activeStep) : activeStep
   const isComplete = session?.status === 'complete'
   const isError = session?.status === 'error' || session?.status === 'validation_failed'
   const isApproved = latestAttempt?.approval_status === 'approved'

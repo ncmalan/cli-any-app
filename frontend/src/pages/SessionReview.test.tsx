@@ -42,7 +42,13 @@ describe('SessionReview safety defaults', () => {
         },
       ])),
       http.get('/api/sessions/s1/domains', () => HttpResponse.json([
-        { domain: 'api.example.test', request_count: 1, is_noise: false, enabled: true },
+        {
+          domain: 'api.example.test',
+          request_count: 1,
+          api_request_count: 1,
+          is_noise: false,
+          enabled: true,
+        },
       ])),
       http.get('/api/settings', () => HttpResponse.json({ has_key: true })),
       http.get('/api/sessions/s1/flows/f1/requests', () => HttpResponse.json([
@@ -82,7 +88,7 @@ describe('SessionReview safety defaults', () => {
     expect(results.violations).toHaveLength(0)
   })
 
-  it('uses zero request count returned by a domain toggle', async () => {
+  it('gates generation on API request count returned by a domain toggle', async () => {
     server.use(
       http.get('/api/sessions/s1', () => HttpResponse.json(stoppedSession)),
       http.get('/api/sessions/s1/flows', () => HttpResponse.json([
@@ -96,12 +102,19 @@ describe('SessionReview safety defaults', () => {
         },
       ])),
       http.get('/api/sessions/s1/domains', () => HttpResponse.json([
-        { domain: 'api.example.test', request_count: 3, is_noise: false, enabled: false },
+        {
+          domain: 'api.example.test',
+          request_count: 3,
+          api_request_count: 0,
+          is_noise: false,
+          enabled: false,
+        },
       ])),
       http.get('/api/settings', () => HttpResponse.json({ has_key: true })),
       http.put('/api/sessions/s1/domains/api.example.test', () => HttpResponse.json({
         domain: 'api.example.test',
-        request_count: 0,
+        request_count: 3,
+        api_request_count: 0,
         is_noise: false,
         enabled: true,
       })),
@@ -109,13 +122,15 @@ describe('SessionReview safety defaults', () => {
 
     renderReview()
 
-    const selectedRequestsLabel = await screen.findByText('Selected requests')
+    const selectedRequestsLabel = await screen.findByText('Selected API requests')
     expect(selectedRequestsLabel.nextElementSibling).toHaveTextContent('0')
-    expect(screen.getByText('3 req')).toBeInTheDocument()
+    expect(screen.getByText('0 API / 3 req')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /generate cli/i })).toBeDisabled()
     await userEvent.click(screen.getByRole('switch', { name: /enable api\.example\.test/i }))
 
     await waitFor(() => expect(selectedRequestsLabel.nextElementSibling).toHaveTextContent('0'))
-    expect(screen.getByText('0 req')).toBeInTheDocument()
+    expect(screen.getByText('0 API / 3 req')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /generate cli/i })).toBeDisabled()
     expect(screen.getByRole('switch', { name: /disable api\.example\.test/i })).toBeInTheDocument()
   })
 })

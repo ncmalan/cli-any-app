@@ -72,6 +72,7 @@ export interface Flow {
 export interface DomainInfo {
   domain: string
   request_count: number
+  api_request_count?: number
   is_noise: boolean
   enabled: boolean
 }

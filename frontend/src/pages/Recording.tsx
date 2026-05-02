@@ -63,9 +63,14 @@ export default function Recording() {
         const ws = new WebSocket(`${proto}//${window.location.host}/ws/traffic/${id}?token=${encodeURIComponent(token)}`)
         wsRef.current = ws
 
-        ws.onopen = () => setWsState('connected')
-        ws.onclose = () => setWsState('disconnected')
+        ws.onopen = () => {
+          if (!cancelled) setWsState('connected')
+        }
+        ws.onclose = () => {
+          if (!cancelled) setWsState('disconnected')
+        }
         ws.onmessage = (event) => {
+          if (cancelled) return
           try {
             const data = JSON.parse(event.data) as TrafficEvent
             setTraffic(prev => [...prev.slice(-499), data])
@@ -74,14 +79,20 @@ export default function Recording() {
           }
         }
       } catch {
-        setWsState('disconnected')
+        if (!cancelled) setWsState('disconnected')
       }
     }
     connect()
     return () => {
       cancelled = true
-      wsRef.current?.close()
-      wsRef.current = null
+      const ws = wsRef.current
+      if (ws) {
+        ws.onopen = null
+        ws.onclose = null
+        ws.onmessage = null
+        ws.close()
+        if (wsRef.current === ws) wsRef.current = null
+      }
     }
   }, [id, session?.status])
 

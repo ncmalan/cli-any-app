@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/sessions/{session_id}/domains", tags=["domains"]
 class DomainInfo(BaseModel):
     domain: str
     request_count: int
+    api_request_count: int
     is_noise: bool
     enabled: bool
 
@@ -101,8 +102,12 @@ async def list_domains(session_id: str):
         if not session or session.status == "deleted":
             raise HTTPException(status_code=404, detail="Session not found")
         domain_candidate = _domain_candidate_expr()
+        api_count = func.coalesce(
+            func.sum(case((CapturedRequest.is_api.is_(True), 1), else_=0)),
+            0,
+        )
         result = await db.execute(
-            select(domain_candidate, func.count(CapturedRequest.id))
+            select(domain_candidate, func.count(CapturedRequest.id), api_count)
             .join(Flow)
             .where(Flow.session_id == session_id)
             .group_by(domain_candidate)
@@ -110,17 +115,29 @@ async def list_domains(session_id: str):
         rows = result.all()
         filters = await load_domain_enabled_map(db, session_id)
 
-    domain_counts: dict[str, int] = {}
-    for domain_candidate, count in rows:
+    domain_counts: dict[str, tuple[int, int]] = {}
+    for domain_candidate, count, api_request_count in rows:
         d = normalize_domain(domain_candidate)
         if d:
-            domain_counts[d] = domain_counts.get(d, 0) + int(count)
+            total_count, total_api_count = domain_counts.get(d, (0, 0))
+            domain_counts[d] = (
+                total_count + int(count),
+                total_api_count + int(api_request_count or 0),
+            )
 
     domains = []
-    for domain, count in sorted(domain_counts.items(), key=lambda x: -x[1]):
+    for domain, (count, api_request_count) in sorted(domain_counts.items(), key=lambda x: -x[1][0]):
         is_noise = matches_noise_pattern(domain)
         enabled = domain_enabled_from_map(filters, domain)
-        domains.append(DomainInfo(domain=domain, request_count=count, is_noise=is_noise, enabled=enabled))
+        domains.append(
+            DomainInfo(
+                domain=domain,
+                request_count=count,
+                api_request_count=api_request_count,
+                is_noise=is_noise,
+                enabled=enabled,
+            )
+        )
     return domains
 
 
@@ -138,11 +155,19 @@ async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
         if not session or session.status == "deleted":
             raise HTTPException(status_code=404, detail="Session not found")
         count_result = await db.execute(
-            select(func.count(CapturedRequest.id))
+            select(
+                func.count(CapturedRequest.id),
+                func.coalesce(
+                    func.sum(case((CapturedRequest.is_api.is_(True), 1), else_=0)),
+                    0,
+                ),
+            )
             .join(Flow)
             .where(Flow.session_id == session_id, _domain_request_filter(domain))
         )
-        request_count = int(count_result.scalar_one() or 0)
+        request_count, api_request_count = count_result.one()
+        request_count = int(request_count or 0)
+        api_request_count = int(api_request_count or 0)
         result = await db.execute(
             select(DomainFilter).where(
                 DomainFilter.session_id == session_id,
@@ -174,6 +199,7 @@ async def toggle_domain(session_id: str, domain: str, body: DomainToggle):
     return DomainInfo(
         domain=domain,
         request_count=request_count,
+        api_request_count=api_request_count,
         is_noise=matches_noise_pattern(domain),
         enabled=body.enabled,
     )

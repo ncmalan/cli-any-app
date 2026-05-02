@@ -65,7 +65,7 @@ describe('Recording regulated capture workflow', () => {
       }),
     )
 
-    renderRecording()
+    const view = renderRecording()
 
     expect(await screen.findByText(/capture is stopped/i)).toBeInTheDocument()
     expect(startCalls).toBe(0)
@@ -77,5 +77,11 @@ describe('Recording regulated capture workflow', () => {
     await waitFor(() => {
       expect(FakeWebSocket.instances[0]?.url).toContain('/ws/traffic/s1?token=ws-test-token')
     })
+
+    const ws = FakeWebSocket.instances[0]
+    view.unmount()
+    expect(ws.onopen).toBeNull()
+    expect(ws.onclose).toBeNull()
+    expect(ws.onmessage).toBeNull()
   })
 })

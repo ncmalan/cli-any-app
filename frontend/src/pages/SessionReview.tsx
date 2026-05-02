@@ -51,9 +51,9 @@ export default function SessionReview() {
   const [hasApiKey, setHasApiKey] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [savingKey, setSavingKey] = useState(false)
-  const enabledRequestCount = domains
+  const enabledApiRequestCount = domains
     .filter(domain => domain.enabled)
-    .reduce((total, domain) => total + domain.request_count, 0)
+    .reduce((total, domain) => total + (domain.api_request_count ?? 0), 0)
 
   useEffect(() => {
     if (!id) return
@@ -124,7 +124,11 @@ export default function SessionReview() {
       const updated = await toggleDomain(id, domain, enabled)
       setDomains(prev => prev.map(d => (
         d.domain === updated.domain
-          ? { ...updated, request_count: updated.request_count ?? d.request_count }
+          ? {
+            ...updated,
+            request_count: updated.request_count ?? d.request_count,
+            api_request_count: updated.api_request_count ?? d.api_request_count ?? 0,
+          }
           : d
       )))
     } catch {
@@ -191,7 +195,7 @@ export default function SessionReview() {
             )}
             <button
               onClick={handleGenerate}
-              disabled={generating || flows.length === 0 || !hasApiKey || enabledRequestCount === 0}
+              disabled={generating || flows.length === 0 || !hasApiKey || enabledApiRequestCount === 0}
               className="bg-blue-600 px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {generating ? 'Starting...' : 'Generate CLI'}
@@ -216,8 +220,8 @@ export default function SessionReview() {
           <div className="text-lg font-semibold">{domains.filter(d => d.enabled).length}</div>
         </div>
         <div className="bg-gray-900 border border-gray-800 rounded p-3">
-          <div className="text-xs text-gray-500">Selected requests</div>
-          <div className="text-lg font-semibold">{enabledRequestCount}</div>
+          <div className="text-xs text-gray-500">Selected API requests</div>
+          <div className="text-lg font-semibold">{enabledApiRequestCount}</div>
         </div>
         <div className="bg-gray-900 border border-gray-800 rounded p-3">
           <div className="text-xs text-gray-500">Redaction</div>
@@ -387,7 +391,7 @@ export default function SessionReview() {
                       <div className="min-w-0 flex-1">
                         <div className="text-sm truncate" title={d.domain}>{d.domain}</div>
                         <div className="text-xs text-gray-500 flex items-center gap-1">
-                          {d.request_count} req
+                          {d.api_request_count ?? 0} API / {d.request_count} req
                           {d.is_noise && <span className="text-yellow-500/60 ml-1">noise</span>}
                         </div>
                       </div>
