@@ -37,7 +37,7 @@ def upgrade() -> None:
     op.create_table(
         "flows",
         sa.Column("id", sa.String(), primary_key=True),
-        sa.Column("session_id", sa.String(), sa.ForeignKey("sessions.id"), nullable=False),
+        sa.Column("session_id", sa.String(), sa.ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False),
         sa.Column("label", sa.String(), nullable=False),
         sa.Column("order", sa.Integer(), nullable=False),
         sa.Column("started_at", sa.DateTime(), nullable=False),
@@ -48,7 +48,7 @@ def upgrade() -> None:
     op.create_table(
         "requests",
         sa.Column("id", sa.String(), primary_key=True),
-        sa.Column("flow_id", sa.String(), sa.ForeignKey("flows.id"), nullable=False),
+        sa.Column("flow_id", sa.String(), sa.ForeignKey("flows.id", ondelete="CASCADE"), nullable=False),
         sa.Column("timestamp", sa.DateTime(), nullable=False),
         sa.Column("method", sa.String(), nullable=False),
         sa.Column("url", sa.String(), nullable=False),

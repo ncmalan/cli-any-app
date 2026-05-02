@@ -22,7 +22,7 @@ class CapturedRequest(Base):
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    flow_id: Mapped[str] = mapped_column(ForeignKey("flows.id"), nullable=False)
+    flow_id: Mapped[str] = mapped_column(ForeignKey("flows.id", ondelete="CASCADE"), nullable=False)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )

@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 
 from cli_any_app.models.database import get_session, init_db
@@ -37,6 +37,14 @@ def test_orm_nullability_matches_baseline_migration_contract():
         "redaction_status",
     ]:
         assert request_columns[column_name].nullable is False
+
+
+def test_orm_foreign_key_cascades_match_baseline_migration_contract():
+    flow_session_fk = next(iter(Flow.__table__.c.session_id.foreign_keys))
+    request_flow_fk = next(iter(CapturedRequest.__table__.c.flow_id.foreign_keys))
+
+    assert flow_session_fk.ondelete == "CASCADE"
+    assert request_flow_fk.ondelete == "CASCADE"
 
 
 @pytest.fixture(autouse=True)
@@ -120,3 +128,33 @@ async def test_flow_request_relationship_orders_without_string_eval(setup_db):
             "https://api.example.com/earlier",
             "https://api.example.com/later",
         ]
+
+
+@pytest.mark.asyncio
+async def test_db_level_cascade_deletes_flows_and_requests(setup_db):
+    async with get_session() as db:
+        session = Session(name="Cascade", app_name="test-app")
+        db.add(session)
+        await db.flush()
+        flow = Flow(session_id=session.id, label="lookup", order=1)
+        db.add(flow)
+        await db.flush()
+        request = CapturedRequest(
+            flow_id=flow.id,
+            method="GET",
+            url="https://api.example.com/patients",
+            status_code=200,
+        )
+        db.add(request)
+        await db.commit()
+        session_id = session.id
+
+    async with get_session() as db:
+        await db.execute(delete(Session).where(Session.id == session_id))
+        await db.commit()
+
+    async with get_session() as db:
+        flow_count = await db.scalar(select(func.count(Flow.id)))
+        request_count = await db.scalar(select(func.count(CapturedRequest.id)))
+        assert flow_count == 0
+        assert request_count == 0
