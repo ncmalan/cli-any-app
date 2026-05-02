@@ -4,6 +4,7 @@ import { approveGenerationAttempt, getGenerationStatus, getSession, getWsToken }
 import type { GenerationAttempt, Session } from '../lib/api'
 
 const STEPS = ['Normalize', 'Analyze', 'Generate', 'Validate']
+const TERMINAL_STATUSES = ['complete', 'error', 'validation_failed', 'needs_review']
 
 interface LogEntry {
   step: string
@@ -84,7 +85,7 @@ export default function GenerationProgress() {
         const [s, status] = await Promise.all([getSession(id!), getGenerationStatus(id!)])
         setSession(s)
         setLatestAttempt(status.latest_attempt)
-        if (['complete', 'error', 'validation_failed'].includes(s.status)) {
+        if (TERMINAL_STATUSES.includes(s.status)) {
           if (intervalRef.current) {
             clearInterval(intervalRef.current)
             intervalRef.current = null
@@ -166,9 +167,10 @@ export default function GenerationProgress() {
 
   const currentStep = session ? stepIndex(session.status, activeStep) : activeStep
   const isComplete = session?.status === 'complete'
-  const isError = session?.status === 'error' || session?.status === 'validation_failed'
+  const isError = ['error', 'validation_failed', 'needs_review'].includes(session?.status ?? '')
   const isApproved = latestAttempt?.approval_status === 'approved'
-  const isApprovalPending = isComplete && latestAttempt && !isApproved
+  const isApprovalPending = isComplete && latestAttempt?.approval_status === 'pending'
+  const isRejected = isComplete && latestAttempt?.approval_status === 'rejected'
   const installPackagePath = latestAttempt?.package_path || 'data/generated/...'
   const installCliName = latestAttempt?.cli_name || 'generated-cli'
 
@@ -335,6 +337,11 @@ export default function GenerationProgress() {
 pip install -e .
 ${installCliName} --help`}
               </pre>
+              </div>
+            )}
+            {isRejected && (
+              <div className="border-t border-green-500/20 pt-3">
+                <p className="text-sm text-yellow-300">Approval was rejected. Return to review to regenerate or approve a later attempt.</p>
               </div>
             )}
           </div>

@@ -172,7 +172,7 @@ frontend/             # React 19 + TypeScript + Vite + Tailwind CSS
 - **Agentic analysis** — The analyzer gives Claude tools to browse traffic incrementally (`list_flows`, `get_flow_requests`, `get_request_detail`, `submit_api_spec`) instead of dumping everything into one prompt. This handles apps with heavy traffic without hitting token limits.
 - **mitmproxy via subprocess** — mitmdump runs as a child process with a custom addon, keeping the proxy's dependency tree separate from the app.
 - **WebSocket streaming** — Both live traffic capture and generation progress are streamed to the UI in real-time.
-- **Metadata-first capture** — Raw request/response bodies are disabled by default. The database stores method, redacted URL/query, host, content type, status, body sizes, and body hashes.
+- **Metadata-first capture** — Raw request/response bodies are disabled by default. The database stores method, redacted URL/query, host, content type, status, body sizes, and keyed body hashes.
 - **Redaction and gating** — Sensitive headers and query secrets are redacted before database write, and generation is blocked unless enabled API requests pass the redaction preflight. This is a safety baseline, not a guarantee that arbitrary medical traces are fully de-identified.
 - **Local regulated MVP** — The default posture is single-operator local use. Hosted, shared, or multi-user deployment requires additional controls beyond this README.
 
@@ -189,12 +189,15 @@ All settings can be overridden via environment variables with the `CLI_ANY_APP_`
 | `CLI_ANY_APP_ALLOW_LAN` | `false` | Required to bind the web server to a LAN address |
 | `CLI_ANY_APP_ADMIN_PASSWORD` | *(generated on first run)* | Initial local operator password |
 | `CLI_ANY_APP_COOKIE_SECURE` | `false` | Set `true` when serving through HTTPS so auth cookies are Secure |
+| `CLI_ANY_APP_WS_ALLOWED_ORIGINS` | `[]` | Additional allowed WebSocket origins, for example `["http://localhost:5173"]` for Vite dev |
 | `CLI_ANY_APP_RAW_BODY_CAPTURE_ENABLED` | `false` | Store encrypted raw payloads and redacted samples |
 | `CLI_ANY_APP_ANTHROPIC_API_KEY` | *(required for generation)* | Anthropic API key for Claude |
 
 Example `.env` file:
 ```
 CLI_ANY_APP_ANTHROPIC_API_KEY=sk-ant-...
+# Optional when running the frontend dev server separately:
+CLI_ANY_APP_WS_ALLOWED_ORIGINS='["http://localhost:5173"]'
 ```
 
 The API key can also be set at runtime through the web UI on the session review page.
@@ -206,7 +209,7 @@ review is complete. The web server binds to loopback by default; LAN exposure re
 `CLI_ANY_APP_ALLOW_LAN=true` and should be limited to trusted networks.
 
 Raw body capture is opt-in. Default capture stores metadata, redacted URLs/headers,
-body sizes, and SHA-256 body hashes. If raw body capture is enabled, payloads are
+body sizes, and keyed body hashes. If raw body capture is enabled, payloads are
 encrypted with a local data key under `data/secrets/` and raw reveal requires an
 authenticated action with a reason that is written to the audit log.
 

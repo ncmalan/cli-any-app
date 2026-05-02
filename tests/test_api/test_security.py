@@ -228,6 +228,23 @@ def test_private_secret_writes_reject_paths_outside_secrets_dir(tmp_path):
     assert not outside_dir.exists()
 
 
+def test_private_secret_directories_are_user_only():
+    import stat
+
+    from cli_any_app.config import settings
+    from cli_any_app.private_files import write_private_bytes
+
+    settings.secrets_dir.mkdir(parents=True, exist_ok=True)
+    settings.secrets_dir.chmod(0o755)
+    nested_secret = settings.secrets_dir / "nested" / "app-secret.key"
+
+    write_private_bytes(nested_secret, b"secret")
+
+    assert stat.S_IMODE(settings.secrets_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(nested_secret.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(nested_secret.stat().st_mode) == 0o600
+
+
 async def test_capture_requires_valid_recording_token(client, monkeypatch):
     from cli_any_app.capture.proxy_manager import proxy_manager
     from cli_any_app.models.database import get_session
