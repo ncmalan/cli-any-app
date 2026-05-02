@@ -77,6 +77,9 @@ def ensure_admin_password() -> str | None:
     """
     path = _admin_hash_path()
     if settings.admin_password:
+        existing = read_private_bytes(path)
+        if existing is not None and verify_secret(settings.admin_password, existing.decode().strip()):
+            return None
         _write_private(path, hash_secret(settings.admin_password))
         return None
     if private_file_exists(path):

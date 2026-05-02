@@ -137,6 +137,36 @@ def test_unsign_payload_rejects_malformed_expiry_values():
     assert unsign_payload(non_numeric_exp, SESSION_PURPOSE) is None
 
 
+def test_configured_admin_password_hash_is_stable_between_calls():
+    from cli_any_app.config import settings
+    from cli_any_app.security import ensure_admin_password, verify_admin_password
+
+    ensure_admin_password()
+    first_hash = (settings.secrets_dir / "admin-password.hash").read_text()
+
+    ensure_admin_password()
+    second_hash = (settings.secrets_dir / "admin-password.hash").read_text()
+
+    assert second_hash == first_hash
+    assert verify_admin_password("test-password") is True
+
+
+def test_configured_admin_password_hash_rotates_when_password_changes():
+    from cli_any_app.config import settings
+    from cli_any_app.security import ensure_admin_password, verify_admin_password
+
+    ensure_admin_password()
+    first_hash = (settings.secrets_dir / "admin-password.hash").read_text()
+
+    settings.admin_password = "rotated-password"
+    ensure_admin_password()
+    second_hash = (settings.secrets_dir / "admin-password.hash").read_text()
+
+    assert second_hash != first_hash
+    assert verify_admin_password("rotated-password") is True
+    assert verify_admin_password("test-password") is False
+
+
 def test_private_secret_writes_reject_symlink_targets(tmp_path):
     from cli_any_app.config import settings
     from cli_any_app.security import _write_private
