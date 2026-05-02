@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import re
 from pathlib import Path
@@ -12,6 +13,7 @@ from cryptography.fernet import Fernet
 
 from cli_any_app.config import settings
 from cli_any_app.private_files import read_private_bytes, write_private_bytes
+from cli_any_app.security import get_app_secret
 
 REDACTED = "<REDACTED>"
 REDACTED_TOKEN = "<REDACTED_TOKEN>"
@@ -102,8 +104,13 @@ PHI_PATTERNS = [
 
 
 def stable_placeholder(label: str, value: str) -> str:
-    digest = hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()[:10]
+    digest = _keyed_digest(f"placeholder:{label}", value)[:10]
     return f"<{label}:{digest}>"
+
+
+def _keyed_digest(purpose: str, value: str) -> str:
+    message = f"{purpose}\0{value}".encode("utf-8", errors="ignore")
+    return hmac.new(get_app_secret(), message, hashlib.sha256).hexdigest()
 
 
 def _private_write(path: Path, data: bytes) -> None:
@@ -146,7 +153,7 @@ def body_size(value: str | None) -> int:
 def body_hash(value: str | None) -> str | None:
     if value is None:
         return None
-    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
+    return _keyed_digest("body", value)
 
 
 def headers_size(headers: dict[str, Any]) -> int:
